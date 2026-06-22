@@ -8,11 +8,18 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type QueuedMessage = {
+  id: string;
+  text: string;
+};
+
 export type Chat = {
   id: string;
   title: string;
   folder: string;
   messages: ChatMessage[];
+  draft: string;
+  queuedMessages: QueuedMessage[];
   createdAt: string;
   updatedAt: string;
 };
@@ -33,19 +40,49 @@ export type AppSettings = {
   };
   checkpoint: { enabled: boolean };
   memory: { enabled: boolean };
+  compaction: { auto: boolean; prune: boolean; reserved: number };
+  watcher: { enabled: boolean };
+  share: string;
+  autoupdate: boolean | "notify";
   experimental: { maxMode: boolean };
   mcpServersJson: string;
   keybindingsJson: string;
+  serverJson: string;
+  instructionsJson: string;
+  providerJson: string;
 };
 
 export type StudioSettings = {
   app: AppSettings;
   chats: Chat[];
+  ui?: {
+    activeChatId?: string;
+    draftChat?: Chat | null;
+  };
 };
 
 export type OutputEvent = {
   type: string;
   text: string;
+};
+
+export type TerminalSession = {
+  id: string;
+  title: string;
+  cwd: string;
+  running: boolean;
+  exitCode: number | null;
+};
+
+export type TerminalDataEvent = {
+  terminalId: string;
+  data: string;
+};
+
+export type TerminalExitEvent = {
+  terminalId: string;
+  code: number | null;
+  cwd?: string;
 };
 
 export type PermissionEvent = {
@@ -60,6 +97,7 @@ declare global {
       getSettings: () => Promise<StudioSettings>;
       saveSettings: (settings: AppSettings) => Promise<{ ok: boolean }>;
       saveChats: (chats: Chat[]) => Promise<{ ok: boolean }>;
+      saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
       checkMimo: () => Promise<{ installed: boolean; version: string }>;
       readProjectConfig: (folder: string) => Promise<{ ok: boolean; config: unknown; raw: string }>;
@@ -75,6 +113,12 @@ declare global {
       onMimoOutput: (callback: (event: OutputEvent) => void) => () => void;
       onMimoPermission: (callback: (event: PermissionEvent) => void) => () => void;
       approvePermission: (type: string) => Promise<{ ok: boolean }>;
+      createTerminalProcess: (payload: { terminalId: string; cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
+      writeTerminalInput: (payload: { terminalId: string; data: string }) => Promise<{ ok: boolean }>;
+      resizeTerminal: (payload: { terminalId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
+      stopTerminalCommand: (terminalId: string) => Promise<{ ok: boolean }>;
+      onTerminalData: (callback: (event: TerminalDataEvent) => void) => () => void;
+      onTerminalExit: (callback: (event: TerminalExitEvent) => void) => () => void;
     };
   }
 }
