@@ -61,6 +61,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | undefined;
 let activeProcess: ChildProcessWithoutNullStreams | undefined;
+let activeRunId = 0;
+let stopRequestedForRun = 0;
+let activeRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let activeRunCancel: (() => void) | undefined;
 const terminalProcesses = new Map<string, IPty>();
 
 function settingsPath() { return join(app.getPath("userData"), "studio-settings.json"); }
@@ -373,8 +377,15 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
 ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false));
 
 ipcMain.handle("mimo:stop", () => {
+  stopRequestedForRun = activeRunId;
+  if (activeRetryTimer) {
+    clearTimeout(activeRetryTimer);
+    activeRetryTimer = undefined;
+  }
   activeProcess?.kill();
   activeProcess = undefined;
+  activeRunCancel?.();
+  activeRunCancel = undefined;
   return { ok: true };
 });
 
@@ -650,7 +661,11 @@ function findMimoBinary(): string | null {
   return null;
 }
 
-function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = ""): Promise<{ ok: boolean; code: number; output: string }> {
+function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0): Promise<{ ok: boolean; code: number; output: string }> {
+  if (!runId) {
+    runId = ++activeRunId;
+    stopRequestedForRun = 0;
+  }
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
@@ -693,6 +708,11 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   }
 
   return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
+    activeRunCancel = () => resolve({ ok: false, code: -3, output: "" });
+    if (stopRequestedForRun === runId) {
+      resolve({ ok: false, code: -3, output: "" });
+      return;
+    }
     const child = spawn(binary, args, {
       cwd,
       windowsHide: true,
@@ -743,6 +763,12 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     if (shouldKill && !child.killed) child.kill();
     activeProcess = undefined;
 
+    if (stopRequestedForRun === runId) {
+      if (activeRunId === runId) activeRunCancel = undefined;
+      resolveInner?.({ ok: false, code: -3, output: fullText });
+      return;
+    }
+
     const hasOutput = fullText.trim().length > 0;
     const errorText = `${stderrText}\n${fullText}`;
     const shouldRetry = !hasOutput && retryCount < MAX_RETRIES && isNetworkError(errorText, code);
@@ -754,8 +780,14 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
         mainWindow?.webContents.send("mimo:output", { type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
         mainWindow?.webContents.send("mimo:output", { type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
       }
-      setTimeout(() => {
-        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText).then((r) => {
+      activeRetryTimer = setTimeout(() => {
+        activeRetryTimer = undefined;
+        if (stopRequestedForRun === runId) {
+          if (activeRunId === runId) activeRunCancel = undefined;
+          resolveInner?.({ ok: false, code: -3, output: fullText });
+          return;
+        }
+        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId).then((r) => {
           resolveInner?.(r);
           return r;
         }));
@@ -775,6 +807,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       });
     }
 
+    if (activeRunId === runId) activeRunCancel = undefined;
     resolveInner?.({ ok: code === 0, code, output: fullText || stderrText });
   };
   resolveInner = resolve;
