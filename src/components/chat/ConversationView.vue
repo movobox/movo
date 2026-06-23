@@ -1,11 +1,54 @@
 <script setup lang="ts">
-import { ArrowDown, Bot, Copy, FolderOpen, Pencil, RotateCcw, Shield, ShieldCheck } from "@lucide/vue";
+import { ArrowDown, Bot, Copy, FileEdit, FilePlus, FileSearch, FileText, FolderOpen, Pencil, RefreshCcw, RotateCcw, Search, Shield, ShieldCheck, Terminal, X } from "@lucide/vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
+import { highlightCode } from "../../utils/highlight";
 import MessageContent from "./MessageContent.vue";
 
 const studio = useStudioStore();
 const { t } = useI18n();
+
+const queuedAsMessages = computed(() => {
+  return studio.messageQueue.map((q) => ({ id: q.id, text: q.text }));
+});
+
+function activityIcon(text: string) {
+  const t = text.toLowerCase();
+  if (t.includes("write") || t.includes("edit") || t.includes("update") || t.includes("create")) return "write";
+  if (t.includes("read") || t.includes("load") || t.includes("open")) return "read";
+  if (t.includes("search") || t.includes("grep") || t.includes("find") || t.includes("glob")) return "search";
+  if (t.includes("bash") || t.includes("command") || t.includes("running command")) return "terminal";
+  if (t.includes("permission")) return "shield";
+  if (t.includes("start") || t.includes("step")) return "step";
+  if (t.includes("complete") || t.includes("done")) return "done";
+  if (t.includes("thinking") || t.includes("thought")) return "step";
+  return "default";
+}
+
+function isFilePath(detail: string) {
+  return /[/\\]/.test(detail) && !detail.startsWith("{") && !detail.startsWith("[");
+}
+
+function openInExplorer(filePath: string) {
+  void window.studio.openPath(filePath);
+}
+
+function hl(code: string, lang: string) {
+  return highlightCode(code, lang || "text");
+}
+
+function extToLang(filePath: string): string {
+  const ext = (filePath.split(".").pop() || "").toLowerCase();
+  const map: Record<string, string> = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", vue: "html", py: "python", php: "php", css: "css", scss: "css", json: "json", md: "markdown", html: "html", sh: "bash", bash: "bash", rs: "rust", go: "go", java: "java", rb: "ruby", c: "c", cpp: "cpp", h: "c" };
+  return map[ext] || ext;
+}
+
+function truncateCode(code: string, maxLines = 40): string {
+  const lines = code.split("\n");
+  if (lines.length <= maxLines) return code;
+  return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
+}
 </script>
 
 <template>
@@ -46,7 +89,7 @@ const { t } = useI18n();
             </template>
 
             <template v-else>
-              <MessageContent :text="message.text" />
+              <MessageContent :text="message.text" :base-folder="studio.activeChat?.folder" />
               <div class="msg-actions" :dir="studio.lineDir(message.text) || 'ltr'">
                 <button v-if="message.role === 'user'" class="msg-action-btn" type="button" :title="t('editMsg')" @click="studio.startEdit(message)">
                   <Pencil :size="12" />
@@ -72,19 +115,58 @@ const { t } = useI18n();
       <div v-if="studio.isRunning" class="chat-msg assistant streaming">
         <div class="avatar ai-av"><Bot :size="15" /></div>
         <div class="msg-content">
-          <div class="activity-feed">
+          <div class="activity-feed" v-if="studio.runActivities.length">
             <div
               v-for="(activity, index) in studio.runActivities"
               :key="index"
               class="activity-row"
+              :class="'activity-' + activityIcon(activity.text)"
             >
-              <span class="activity-dot"></span>
-              <span>{{ activity }}</span>
+              <div class="activity-icon">
+                <FileEdit v-if="activityIcon(activity.text) === 'write'" :size="13" />
+                <FileText v-else-if="activityIcon(activity.text) === 'read'" :size="13" />
+                <FileSearch v-else-if="activityIcon(activity.text) === 'search'" :size="13" />
+                <Terminal v-else-if="activityIcon(activity.text) === 'terminal'" :size="13" />
+                <Shield v-else-if="activityIcon(activity.text) === 'shield'" :size="13" />
+                <Bot v-else-if="activityIcon(activity.text) === 'done'" :size="13" />
+                <span v-else class="activity-dot"></span>
+              </div>
+              <div class="activity-info">
+                <span class="activity-title">{{ activity.text }}</span>
+                <span
+                  v-if="activity.detail"
+                  class="activity-detail"
+                  :class="{ 'activity-file-link': isFilePath(activity.detail) }"
+                  @click="isFilePath(activity.detail) && openInExplorer(activity.detail)"
+                >{{ activity.detail }}</span>
+
+                <div v-if="activity.oldCode || activity.newCode" class="activity-diff">
+                  <div v-if="activity.editFilePath" class="diff-filepath">{{ activity.editFilePath }}</div>
+                  <div v-if="activity.oldCode" class="diff-block diff-removed">
+                    <div class="diff-label">- removed</div>
+                    <pre class="diff-code"><code v-html="hl(truncateCode(activity.oldCode), activity.codeLang || extToLang(activity.editFilePath || ''))"></code></pre>
+                  </div>
+                  <div v-if="activity.newCode" class="diff-block diff-added">
+                    <div class="diff-label">+ added</div>
+                    <pre class="diff-code"><code v-html="hl(truncateCode(activity.newCode), activity.codeLang || extToLang(activity.editFilePath || ''))"></code></pre>
+                  </div>
+                </div>
+
+                <div v-else-if="activity.code" class="activity-code-block">
+                  <pre class="activity-code"><code v-html="hl(truncateCode(activity.code), activity.codeLang || 'text')"></code></pre>
+                </div>
+              </div>
             </div>
-            <div v-if="!studio.runActivities.length" class="activity-row">
-              <span class="activity-dot"></span>
+          </div>
+          <div v-if="!studio.runActivities.length" class="activity-feed">
+            <div class="activity-row">
+              <div class="activity-icon"><span class="activity-dot"></span></div>
               <span>{{ t("workingOnIt") }}</span>
             </div>
+          </div>
+
+          <div v-if="studio.streamingText.trim()" class="streaming-output">
+            <MessageContent :text="studio.streamingText" :base-folder="studio.activeChat?.folder" />
           </div>
 
           <div v-for="perm in studio.pendingPermissions" :key="perm.type + perm.target" class="permission-card">
@@ -102,6 +184,33 @@ const { t } = useI18n();
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div v-if="queuedAsMessages.length" class="queued-messages">
+        <div v-for="q in queuedAsMessages" :key="q.id" class="chat-msg user queued-msg">
+          <div class="avatar user-av">U</div>
+          <div class="msg-body">
+            <div class="msg-text queued-text">{{ q.text }}</div>
+            <span class="queued-badge">{{ t("queued") || "queued" }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="studio.interruptedRun && !studio.isRunning" class="interrupt-banner">
+        <div class="interrupt-icon"><RefreshCcw :size="16" /></div>
+        <div class="interrupt-info">
+          <span class="interrupt-title">{{ t("interruptedTitle") }}</span>
+          <span class="interrupt-detail">{{ t("interruptedDetail", { attempt: studio.interruptedRun.attempt, max: studio.interruptedRun.maxRetries }) }}</span>
+          <span v-if="studio.interruptedRun.stderr" class="interrupt-error">{{ studio.interruptedRun.stderr }}</span>
+        </div>
+        <div class="interrupt-actions">
+          <button class="interrupt-btn resume" type="button" @click="studio.resumeInterruptedRun">
+            <RefreshCcw :size="13" /> {{ t("resume") }}
+          </button>
+          <button class="interrupt-btn dismiss" type="button" @click="studio.dismissInterrupted">
+            <X :size="13" />
+          </button>
         </div>
       </div>
     </div>

@@ -64,6 +64,13 @@ export type StudioSettings = {
 export type OutputEvent = {
   type: string;
   text: string;
+  detail?: string;
+  step?: number;
+  code?: string;
+  codeLang?: string;
+  oldCode?: string;
+  newCode?: string;
+  editFilePath?: string;
 };
 
 export type TerminalSession = {
@@ -85,10 +92,30 @@ export type TerminalExitEvent = {
   cwd?: string;
 };
 
+export type ProjectFile = {
+  path: string;
+  name: string;
+};
+
+export type ProjectChanges = {
+  files: { path: string; status: string }[];
+  diff: string;
+  isGitRepo: boolean;
+};
+
 export type PermissionEvent = {
   type: string;
   target: string;
   raw: string;
+};
+
+export type InterruptedEvent = {
+  chatId: string;
+  message: string;
+  code: number;
+  stderr: string;
+  attempt: number;
+  maxRetries: number;
 };
 
 declare global {
@@ -99,6 +126,12 @@ declare global {
       saveChats: (chats: Chat[]) => Promise<{ ok: boolean }>;
       saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
+      pickFiles: () => Promise<string[]>;
+      listProjectFiles: (folder: string) => Promise<{ ok: boolean; files: ProjectFile[]; error?: string }>;
+      runShellCommand: (payload: { command: string; cwd?: string }) => Promise<{ ok: boolean; code: number; output: string }>;
+      getProjectChanges: (folder: string) => Promise<{ ok: boolean; changes: ProjectChanges }>;
+      exportChat: (chat: Chat) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      importChat: () => Promise<{ ok: boolean; chat?: Chat; error?: string }>;
       checkMimo: () => Promise<{ installed: boolean; version: string }>;
       readProjectConfig: (folder: string) => Promise<{ ok: boolean; config: unknown; raw: string }>;
       saveProjectConfig: (payload: { folder: string; appSettings: AppSettings }) => Promise<{ ok: boolean; path: string }>;
@@ -111,6 +144,7 @@ declare global {
       listSessions: () => Promise<{ ok: boolean; code: number; output: string }>;
       stopMimo: () => Promise<{ ok: boolean }>;
       onMimoOutput: (callback: (event: OutputEvent) => void) => () => void;
+      onMimoInterrupted: (callback: (event: InterruptedEvent) => void) => () => void;
       onMimoPermission: (callback: (event: PermissionEvent) => void) => () => void;
       approvePermission: (type: string) => Promise<{ ok: boolean }>;
       createTerminalProcess: (payload: { terminalId: string; cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -119,6 +153,8 @@ declare global {
       stopTerminalCommand: (terminalId: string) => Promise<{ ok: boolean }>;
       onTerminalData: (callback: (event: TerminalDataEvent) => void) => () => void;
       onTerminalExit: (callback: (event: TerminalExitEvent) => void) => () => void;
+      openPath: (filePath: string) => Promise<{ ok: boolean }>;
+      openExternal: (url: string) => Promise<{ ok: boolean }>;
     };
   }
 }

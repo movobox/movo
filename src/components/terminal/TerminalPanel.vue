@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Maximize2, Plus, Square, Trash2, X } from "@lucide/vue";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useI18n } from "vue-i18n";
@@ -22,27 +23,28 @@ let resizeObserver: ResizeObserver | undefined;
 
 function terminalTheme() {
   return {
-    background: "#050506",
-    foreground: "#d4d4d8",
-    cursor: "#f4f4f5",
-    cursorAccent: "#050506",
-    selectionBackground: "#3f3f46",
-    black: "#18181b",
-    red: "#ef4444",
-    green: "#22c55e",
-    yellow: "#eab308",
-    blue: "#60a5fa",
-    magenta: "#a78bfa",
-    cyan: "#22d3ee",
-    white: "#e4e4e7",
-    brightBlack: "#52525b",
-    brightRed: "#f87171",
-    brightGreen: "#4ade80",
-    brightYellow: "#fde047",
-    brightBlue: "#93c5fd",
-    brightMagenta: "#c4b5fd",
-    brightCyan: "#67e8f9",
-    brightWhite: "#fafafa"
+    background: "#0c0c0c",
+    foreground: "#cccccc",
+    cursor: "#ffffff",
+    cursorAccent: "#0c0c0c",
+    selectionBackground: "#264f78",
+    selectionForeground: "#ffffff",
+    black: "#0c0c0c",
+    red: "#c50f1f",
+    green: "#13a10e",
+    yellow: "#c19c00",
+    blue: "#0037da",
+    magenta: "#881798",
+    cyan: "#3a96dd",
+    white: "#cccccc",
+    brightBlack: "#767676",
+    brightRed: "#e74856",
+    brightGreen: "#16c60c",
+    brightYellow: "#f9f1a5",
+    brightBlue: "#3b78ff",
+    brightMagenta: "#b4009e",
+    brightCyan: "#61d6d6",
+    brightWhite: "#f2f2f2"
   };
 }
 
@@ -73,7 +75,7 @@ function mountRuntime(terminalId: string) {
   if (!host) return;
 
   const terminal = new Terminal({
-    allowProposedApi: false,
+    allowProposedApi: true,
     convertEol: true,
     cursorBlink: true,
     cursorStyle: "block",
@@ -82,11 +84,18 @@ function mountRuntime(terminalId: string) {
     lineHeight: 1.22,
     scrollback: 8000,
     tabStopWidth: 4,
-    theme: terminalTheme()
+    theme: terminalTheme(),
+    drawBoldTextInBrightColors: true,
+    allowTransparency: false
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(host);
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => { webgl.dispose(); });
+    terminal.loadAddon(webgl);
+  } catch {}
   terminal.onData((data) => {
     void window.studio.writeTerminalInput({ terminalId, data });
   });

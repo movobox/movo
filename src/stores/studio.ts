@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, nextTick, ref, watch } from "vue";
 import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
-import type { AppSettings, Chat, ChatMessage, PermissionEvent, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
+import type { AppSettings, Chat, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
 import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime, uid } from "../utils/chat";
 import { useLanguageStore } from "./language";
 
@@ -25,14 +25,21 @@ export const useStudioStore = defineStore("studio", () => {
   const showModelMenu = ref(false);
   const deleteConfirmId = ref("");
   const streamingText = ref("");
-  const runActivities = ref<string[]>([]);
+  const runActivities = ref<{ text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string }[]>([]);
   const pendingPermissions = ref<PermissionEvent[]>([]);
+  const projectFiles = ref<ProjectFile[]>([]);
+  const filePickerOpen = ref(false);
+  const filePickerQuery = ref("");
   const editingMsgId = ref("");
   const editingText = ref("");
+  const editingChatId = ref("");
+  const editingChatTitle = ref("");
   const isDisconnected = ref(false);
   const messagesEl = ref<HTMLElement | null>(null);
   const isPinnedToBottom = ref(true);
   const showScrollToBottom = ref(false);
+  const droppedFiles = ref<string[]>([]);
+  const interruptedRun = ref<InterruptedEvent | null>(null);
 
   let disconnectTimer: ReturnType<typeof setInterval> | null = null;
   let saveChatsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,6 +48,7 @@ export const useStudioStore = defineStore("studio", () => {
   let outputUnsubscribe: (() => void) | undefined;
   let permissionUnsubscribe: (() => void) | undefined;
   let terminalExitUnsubscribe: (() => void) | undefined;
+  let interruptedUnsubscribe: (() => void) | undefined;
   let stopRequested = false;
   const bottomThreshold = 96;
 
@@ -65,6 +73,12 @@ export const useStudioStore = defineStore("studio", () => {
   const draftDir = computed(() => lineDir(activeDraft.value) || "ltr");
   const messageQueue = computed<QueuedMessage[]>(() => activeChat.value?.queuedMessages || []);
   const canRun = computed(() => Boolean(activeChat.value?.folder && activeDraft.value.trim()));
+  const selectedContextFiles = computed(() => extractMentionedFiles(activeDraft.value, projectFiles.value));
+  const fileSuggestions = computed(() => {
+    const query = filePickerQuery.value.trim().toLowerCase();
+    if (!filePickerOpen.value || !query) return [];
+    return fuzzyFiles(projectFiles.value, query).slice(0, 8);
+  });
 
   const chatSizeInfo = computed(() => {
     const chat = activeChat.value;
@@ -159,6 +173,35 @@ export const useStudioStore = defineStore("studio", () => {
     void nextTick(() => scrollToBottom("auto"));
   }
 
+  function startEditChat(chatId: string) {
+    const chat = chats.value.find((c) => c.id === chatId) || (draftChat.value?.id === chatId ? draftChat.value : null);
+    if (!chat) return;
+    editingChatId.value = chatId;
+    editingChatTitle.value = chat.title;
+    nextTick(() => {
+      const el = document.querySelector(".chat-title-input") as HTMLInputElement | null;
+      el?.focus();
+      el?.select();
+    });
+  }
+
+  function cancelEditChat() {
+    editingChatId.value = "";
+    editingChatTitle.value = "";
+  }
+
+  function saveEditChat() {
+    const title = editingChatTitle.value.trim();
+    if (!editingChatId.value || !title) { cancelEditChat(); return; }
+    const chat = chats.value.find((c) => c.id === editingChatId.value) || (draftChat.value?.id === editingChatId.value ? draftChat.value : null);
+    if (chat) {
+      chat.title = title;
+      chat.updatedAt = now();
+      schedulePersistence();
+    }
+    cancelEditChat();
+  }
+
   async function deleteChat(chatId: string) {
     chats.value = chats.value.filter((c) => c.id !== chatId);
     if (!chats.value.length) {
@@ -183,7 +226,18 @@ export const useStudioStore = defineStore("studio", () => {
       appSettings.value = settingsFromProjectConfig(existingConfig.config);
     }
     await window.studio.saveProjectConfig({ folder, appSettings: clone(appSettings.value) });
+    await loadProjectFiles();
     schedulePersistence();
+  }
+
+  async function loadProjectFiles() {
+    const folder = activeChat.value?.folder;
+    if (!folder) {
+      projectFiles.value = [];
+      return;
+    }
+    const result = await window.studio.listProjectFiles(folder);
+    projectFiles.value = result.ok ? result.files : [];
   }
 
   async function checkCli() {
@@ -214,12 +268,18 @@ export const useStudioStore = defineStore("studio", () => {
     const text = activeDraft.value.trim();
     if (!chat || !canRun.value || !text) return;
 
+    if (await handleLocalCommand(text)) return;
+
+    const contextFiles = extractMentionedFiles(text, projectFiles.value);
+    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
+    droppedFiles.value = [];
     chat.messages.push(makeMessage("user", text));
     if (chat.messages.length === 1) chat.title = text.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
     streamingText.value = "";
-    runActivities.value = [translate("workingOnIt")];
+    const runStartedAt = Date.now();
+    runActivities.value = [{ text: translate("workingOnIt"), detail: "" }];
     pendingPermissions.value = [];
     isRunning.value = true;
     isStopping.value = false;
@@ -232,12 +292,14 @@ export const useStudioStore = defineStore("studio", () => {
       await persistUiState();
       const payload = {
         chat: clone(chat),
-        message: text,
+        message: buildPromptWithCommandContext(text),
         appSettings: clone(appSettings.value),
-        extraFiles: []
+        extraFiles: allExtraFiles
       };
       const result = await window.studio.runMimo(payload);
       const finalText = result.output.trim();
+      const activityLog = formatRunActivities(runActivities.value, Date.now() - runStartedAt);
+      if (activityLog) chat.messages.push(makeMessage("system", activityLog));
       if (stopRequested) {
         if (streamingText.value.trim()) {
           chat.messages.push(makeMessage("assistant", streamingText.value.trim()));
@@ -246,6 +308,10 @@ export const useStudioStore = defineStore("studio", () => {
         }
         streamingText.value = "";
         chat.messages.push(makeMessage("system", translate("stoppedByUser")));
+      } else if (!result.ok && finalText && interruptedRun.value) {
+        streamingText.value = "";
+        chat.messages.push(makeMessage("assistant", finalText));
+        chat.messages.push(makeMessage("system", translate("interruptedTitle")));
       } else if (finalText) {
         streamingText.value = "";
         chat.messages.push(makeMessage(result.ok ? "assistant" : "system", finalText));
@@ -256,6 +322,7 @@ export const useStudioStore = defineStore("studio", () => {
         chat.messages.push(makeMessage("system", `Exit code ${result.code}`));
       }
       chat.updatedAt = now();
+      await appendProjectChanges(chat);
       if (draftChat.value?.id === chat.id) {
         chats.value.unshift(chat);
         activeChatId.value = chat.id;
@@ -277,6 +344,116 @@ export const useStudioStore = defineStore("studio", () => {
       scrollMessages({ behavior: "smooth" });
       void processQueue();
     }
+  }
+
+  async function handleLocalCommand(text: string) {
+    if (text.startsWith("!")) {
+      await runBangCommand(text.slice(1).trim());
+      return true;
+    }
+    if (!text.startsWith("/")) return false;
+    const [command, ...args] = text.slice(1).trim().split(/\s+/);
+    const rest = args.join(" ");
+    if (command === "new") {
+      startNewChat(activeChat.value?.folder || "");
+      return true;
+    }
+    if (command === "sessions") {
+      const chat = activeChat.value;
+      if (!chat) return true;
+      const result = await window.studio.listSessions();
+      chat.messages.push(makeMessage("user", text));
+      chat.messages.push(makeMessage("system", `MiMo sessions:\n\n\`\`\`text\n${result.output.trim() || "No sessions found."}\n\`\`\``));
+      chat.draft = "";
+      schedulePersistence();
+      return true;
+    }
+    if (command === "compact") {
+      const chat = activeChat.value;
+      if (!chat) return true;
+      chat.messages.push(makeMessage("user", text));
+      chat.messages.push(makeMessage("system", "Context compaction requested. The next MiMo run will use the current saved session/context."));
+      chat.draft = "";
+      schedulePersistence();
+      return true;
+    }
+    if (command === "export") {
+      await exportCurrentChat();
+      activeDraft.value = rest;
+      return true;
+    }
+    return false;
+  }
+
+  async function runBangCommand(command: string) {
+    const chat = activeChat.value;
+    if (!chat || !command) return;
+    chat.messages.push(makeMessage("user", `!${command}`));
+    chat.draft = "";
+    const runStartedAt = Date.now();
+    runActivities.value = [{ text: "Running command", detail: command }];
+    isRunning.value = true;
+    await nextTick();
+    scrollToBottom("smooth");
+    const result = await window.studio.runShellCommand({ command, cwd: chat.folder });
+    const output = result.output.trim() || "(no output)";
+    const activityLog = formatRunActivities(runActivities.value, Date.now() - runStartedAt);
+    if (activityLog) chat.messages.push(makeMessage("system", activityLog));
+    chat.messages.push(makeMessage("system", `Command output entered context:\n\n\`\`\`text\n${output.slice(0, 12000)}\n\`\`\``));
+    chat.updatedAt = now();
+    isRunning.value = false;
+    runActivities.value = [];
+    schedulePersistence();
+    await nextTick();
+    scrollToBottom("smooth");
+  }
+
+  function buildPromptWithCommandContext(text: string) {
+    const commandBlocks = activeChat.value?.messages
+      .filter((message) => message.role === "system" && message.text.startsWith("Command output entered context:"))
+      .slice(-3)
+      .map((message) => message.text)
+      .join("\n\n") || "";
+    if (!commandBlocks) return text;
+    return `${text}\n\nRecent command context:\n${commandBlocks}`;
+  }
+
+  async function appendProjectChanges(chat: Chat) {
+    if (!chat.folder) return;
+    const result = await window.studio.getProjectChanges(chat.folder);
+    const changes = result.changes;
+    if (!changes.isGitRepo) return;
+    if (!changes.files.length && !changes.diff.trim()) return;
+    const last = chat.messages[chat.messages.length - 1];
+    if (!last || last.role !== "assistant") return;
+    const statusIcon: Record<string, string> = {
+      modified: "M",
+      added: "A",
+      deleted: "D",
+      renamed: "R",
+      untracked: "?",
+      copied: "C"
+    };
+    const statusColor: Record<string, string> = {
+      modified: "#eab308",
+      added: "#22c55e",
+      deleted: "#ef4444",
+      renamed: "#a78bfa",
+      untracked: "#94a3b8",
+      copied: "#60a5fa"
+    };
+    const fileLines = changes.files.map((f) => {
+      const icon = statusIcon[f.status] || "?";
+      const color = statusColor[f.status] || "#94a3b8";
+      return `| \`${icon}\` | \`${f.path}\` |`;
+    });
+    const header = `|   | File |`;
+    const separator = `|---|------|`;
+    const fileTable = [header, separator, ...fileLines].join("\n");
+    const diff = changes.diff.trim()
+      ? `\n\n<details>\n<summary>View Diff (${changes.diff.trim().split("\n").filter((l: string) => l.startsWith("+") || l.startsWith("-")).length} lines changed)</summary>\n\n\`\`\`diff\n${changes.diff.trim()}\n\`\`\`\n</details>`
+      : "";
+    last.text = `${last.text}\n\n---\n\n### Changed files\n\n${fileTable}${diff}`;
   }
 
   async function processQueue() {
@@ -324,14 +501,32 @@ export const useStudioStore = defineStore("studio", () => {
     await window.studio.stopMimo();
   }
 
-  function pushRunActivity(text: string) {
+  function dismissInterrupted() {
+    interruptedRun.value = null;
+  }
+
+  async function resumeInterruptedRun() {
+    const interrupted = interruptedRun.value;
+    if (!interrupted) return;
+    interruptedRun.value = null;
+    const chat = activeChat.value;
+    if (!chat) return;
+    const prompt = interrupted.message || [...chat.messages].reverse().find((m) => m.role === "user")?.text || "";
+    if (!prompt) return;
+    chat.draft = `Continue from where the previous response was interrupted. Do not repeat completed parts unless necessary.\n\nOriginal request:\n${prompt}`;
+    schedulePersistence();
+    await nextTick();
+    void runPrompt();
+  }
+
+  function pushRunActivity(text: string, detail = "", code?: string, codeLang?: string, oldCode?: string, newCode?: string, editFilePath?: string) {
     const clean = text.trim();
     if (!clean) return;
     const last = runActivities.value[runActivities.value.length - 1];
-    if (last === clean) return;
-    runActivities.value.push(clean);
-    if (runActivities.value.length > 8) {
-      runActivities.value.splice(0, runActivities.value.length - 8);
+    if (last && last.text === clean && last.detail === detail.trim() && last.code === code) return;
+    runActivities.value.push({ text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (runActivities.value.length > 50) {
+      runActivities.value.splice(0, runActivities.value.length - 50);
     }
   }
 
@@ -407,6 +602,36 @@ export const useStudioStore = defineStore("studio", () => {
 
   function denyPermission(permType: string) {
     pendingPermissions.value = pendingPermissions.value.filter((p) => p.type !== permType);
+  }
+
+  function updateFilePickerFromDraft() {
+    const beforeCursor = activeDraft.value;
+    const match = beforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
+    filePickerOpen.value = Boolean(match && projectFiles.value.length);
+    filePickerQuery.value = match?.[1] || "";
+  }
+
+  function insertContextFile(path: string) {
+    const draft = activeDraft.value;
+    const replacement = `@${path} `;
+    activeDraft.value = draft.replace(/(?:^|\s)@([^\s@]*)$/, (match) => {
+      const prefix = match.startsWith(" ") ? " " : "";
+      return `${prefix}${replacement}`;
+    });
+    filePickerOpen.value = false;
+    filePickerQuery.value = "";
+  }
+
+  function attachMentionFile(path: string) {
+    const clean = path.trim();
+    if (!clean) return;
+    if (!droppedFiles.value.includes(clean)) droppedFiles.value.push(clean);
+    const mention = `@${clean}`;
+    if (!activeDraft.value.includes(mention)) {
+      activeDraft.value = `${activeDraft.value.trimEnd()} ${mention} `.trimStart();
+    }
+    filePickerOpen.value = false;
+    filePickerQuery.value = "";
   }
 
   function updateScrollState() {
@@ -489,6 +714,44 @@ export const useStudioStore = defineStore("studio", () => {
     void navigator.clipboard.writeText(text);
   }
 
+  async function exportCurrentChat() {
+    const chat = activeChat.value;
+    if (!chat) return;
+    const result = await window.studio.exportChat(clone(chat));
+    if (result.ok && result.path) {
+      chat.messages.push(makeMessage("system", `Session exported:\n\n\`${result.path}\``));
+      schedulePersistence();
+    }
+  }
+
+  async function importSession() {
+    const result = await window.studio.importChat();
+    if (!result.ok || !result.chat) return;
+    const chat = normalizeChat(result.chat, translate("untitled"));
+    chat.id = uid();
+    chat.updatedAt = now();
+    chats.value.unshift(chat);
+    draftChat.value = null;
+    activeChatId.value = chat.id;
+    await persistChats();
+    await persistUiState();
+    await loadProjectFiles();
+  }
+
+  function forkCurrentChat() {
+    const chat = activeChat.value;
+    if (!chat) return;
+    const fork = normalizeChat(clone(chat), translate("untitled"));
+    fork.id = uid();
+    fork.title = `${fork.title} (fork)`;
+    fork.createdAt = now();
+    fork.updatedAt = now();
+    chats.value.unshift(fork);
+    draftChat.value = null;
+    activeChatId.value = fork.id;
+    schedulePersistence();
+  }
+
   function checkConnection() {
     window.studio.checkMimo().then((result) => {
       isDisconnected.value = !result.installed;
@@ -508,6 +771,17 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   function handleComposerKeydown(e: KeyboardEvent) {
+    updateFilePickerFromDraft();
+    if (e.key === "Escape" && filePickerOpen.value) {
+      e.preventDefault();
+      filePickerOpen.value = false;
+      return;
+    }
+    if ((e.key === "Tab" || e.key === "Enter") && filePickerOpen.value && fileSuggestions.value[0]) {
+      e.preventDefault();
+      insertContextFile(fileSuggestions.value[0].path);
+      return;
+    }
     if (e.key !== "Enter" || e.shiftKey) return;
     e.preventDefault();
     if (isRunning.value && activeDraft.value.trim()) queueDraft();
@@ -529,9 +803,10 @@ export const useStudioStore = defineStore("studio", () => {
     await nextTick();
     scrollToBottom("auto");
     await checkCli();
+    await loadProjectFiles();
     outputUnsubscribe = window.studio.onMimoOutput((event) => {
       if (event.type === "activity" && isRunning.value) {
-        pushRunActivity(event.text);
+        pushRunActivity(event.text, event.detail || "", event.code, event.codeLang, event.oldCode, event.newCode, event.editFilePath);
         void nextTick(() => scrollMessages({ behavior: "smooth" }));
       } else if (event.type === "stdout" && isRunning.value) {
         if (!streamingText.value.trim()) pushRunActivity(translate("writingFinal"));
@@ -551,6 +826,10 @@ export const useStudioStore = defineStore("studio", () => {
       }
     });
     terminalExitUnsubscribe = window.studio.onTerminalExit(handleTerminalExit);
+    interruptedUnsubscribe = window.studio.onMimoInterrupted((event) => {
+      interruptedRun.value = event;
+      void nextTick(() => scrollMessages({ behavior: "smooth" }));
+    });
     checkConnection();
     disconnectTimer = setInterval(checkConnection, 15000);
   }
@@ -559,6 +838,7 @@ export const useStudioStore = defineStore("studio", () => {
     outputUnsubscribe?.();
     permissionUnsubscribe?.();
     terminalExitUnsubscribe?.();
+    interruptedUnsubscribe?.();
     if (disconnectTimer) clearInterval(disconnectTimer);
     if (saveChatsTimer) clearTimeout(saveChatsTimer);
     if (saveUiTimer) clearTimeout(saveUiTimer);
@@ -570,6 +850,8 @@ export const useStudioStore = defineStore("studio", () => {
   });
   watch(appSettings, saveAppSettings, { deep: true });
   watch(activeChatId, scheduleUiSave);
+  watch(() => activeChat.value?.folder, () => void loadProjectFiles());
+  watch(activeDraft, updateFilePickerFromDraft);
   watch(draftChat, scheduleUiSave, { deep: true });
   watch(chats, scheduleChatsSave, { deep: true });
 
@@ -591,9 +873,18 @@ export const useStudioStore = defineStore("studio", () => {
     streamingText,
     runActivities,
     pendingPermissions,
+    projectFiles,
+    filePickerOpen,
+    filePickerQuery,
+    selectedContextFiles,
+    fileSuggestions,
+    droppedFiles,
     editingMsgId,
     editingText,
+    editingChatId,
+    editingChatTitle,
     isDisconnected,
+    interruptedRun,
     messagesEl,
     showScrollToBottom,
     activeChat,
@@ -626,13 +917,25 @@ export const useStudioStore = defineStore("studio", () => {
     editQueued,
     deleteQueued,
     stopRun,
+    dismissInterrupted,
+    resumeInterruptedRun,
+    queueDraft,
     approvePermission,
     denyPermission,
+    updateFilePickerFromDraft,
+    insertContextFile,
+    attachMentionFile,
     startEdit,
     cancelEdit,
     saveEdit,
+    startEditChat,
+    cancelEditChat,
+    saveEditChat,
     revertTo,
     copyMessage,
+    exportCurrentChat,
+    importSession,
+    forkCurrentChat,
     selectAgent,
     selectModel,
     handleComposerKeydown,
@@ -640,3 +943,87 @@ export const useStudioStore = defineStore("studio", () => {
     destroy
   };
 });
+
+function extractMentionedFiles(text: string, files: ProjectFile[]) {
+  const known = new Set(files.map((file) => file.path));
+  const matches = text.match(/@([^\s`"'<>]+)/g) || [];
+  return Array.from(new Set(matches.map((match) => match.slice(1)).filter((path) => known.has(path))));
+}
+
+function fuzzyFiles(files: ProjectFile[], query: string) {
+  return [...files]
+    .map((file) => ({ file, score: fuzzyScore(file.path.toLowerCase(), query) }))
+    .filter((item) => item.score > -1)
+    .sort((a, b) => b.score - a.score || a.file.path.length - b.file.path.length)
+    .map((item) => item.file);
+}
+
+function fuzzyScore(value: string, query: string) {
+  if (value.includes(query)) return 1000 - value.indexOf(query) - value.length * 0.01;
+  let score = 0;
+  let cursor = 0;
+  for (const char of query) {
+    const found = value.indexOf(char, cursor);
+    if (found < 0) return -1;
+    score += found === cursor ? 8 : 2;
+    cursor = found + 1;
+  }
+  return score - value.length * 0.01;
+}
+
+function formatRunActivities(activities: { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string }[], elapsedMs: number) {
+  const useful = activities
+    .map((activity) => ({
+      ...activity,
+      text: activity.text.trim(),
+      detail: activity.detail.trim()
+    }))
+    .filter((activity) => activity.text || activity.detail || activity.code || activity.oldCode || activity.newCode);
+  if (!useful.length) return "";
+
+  const lines = [
+    `<details class="activity-log-summary">`,
+    `<summary>${formatWorkedDuration(elapsedMs)}</summary>`,
+    ""
+  ];
+  for (const activity of useful) {
+    const title = activity.detail ? `${activity.text}: ${activity.detail}` : activity.text;
+    lines.push(`- ${title}`);
+    if (activity.editFilePath) lines.push(`  - File: \`${activity.editFilePath}\``);
+    if (activity.code) {
+      lines.push("");
+      lines.push(`\`\`\`${activity.codeLang || "text"}`);
+      lines.push(truncateActivityCode(activity.code));
+      lines.push("```");
+      lines.push("");
+    }
+    if (activity.oldCode || activity.newCode) {
+      lines.push("");
+      lines.push("```diff");
+      if (activity.oldCode) {
+        lines.push(...truncateActivityCode(activity.oldCode).split("\n").map((line) => `-${line}`));
+      }
+      if (activity.newCode) {
+        lines.push(...truncateActivityCode(activity.newCode).split("\n").map((line) => `+${line}`));
+      }
+      lines.push("```");
+      lines.push("");
+    }
+  }
+  lines.push("</details>");
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function formatWorkedDuration(elapsedMs: number) {
+  const seconds = Math.max(1, Math.round(elapsedMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes <= 0) return `Worked for ${rest}s`;
+  return `Worked for ${minutes}m ${rest}s`;
+}
+
+function truncateActivityCode(code: string, maxLines = 40) {
+  const lines = code.split("\n");
+  if (lines.length <= maxLines) return code;
+  return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} more lines)`;
+}

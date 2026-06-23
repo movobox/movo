@@ -1,9 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
+import type { IPty } from "node-pty";
+import pty from "node-pty";
 
 type AppSettings = {
   language: string;
@@ -58,7 +60,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | undefined;
 let activeProcess: ChildProcessWithoutNullStreams | undefined;
-const terminalProcesses = new Map<string, ChildProcessWithoutNullStreams>();
+const terminalProcesses = new Map<string, IPty>();
 
 function settingsPath() { return join(app.getPath("userData"), "studio-settings.json"); }
 
@@ -138,6 +140,91 @@ ipcMain.handle("folder:pick", async () => {
   return result.canceled ? "" : result.filePaths[0];
 });
 
+ipcMain.handle("file:pick", async () => {
+  if (!mainWindow) return [];
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"]
+    });
+    return result.canceled ? [] : result.filePaths;
+  } catch (e) {
+    console.error("[main] file:pick error:", e);
+    return [];
+  }
+});
+
+ipcMain.handle("project:files", async (_event, folder: string) => {
+  if (!folder || !existsSync(folder)) return { ok: false, files: [], error: "Project folder is missing." };
+  try {
+    const output = await runCommandCapture("rg", ["--files", "--hidden", "-g", "!node_modules", "-g", "!dist", "-g", "!release", "-g", "!.git"], folder, 12000);
+    if (output.ok) {
+      return {
+        ok: true,
+        files: output.output.split(/\r?\n/).filter(Boolean).slice(0, 5000).map((path) => ({ path, name: basename(path) }))
+      };
+    }
+  } catch {}
+  return { ok: true, files: scanProjectFiles(folder).slice(0, 5000) };
+});
+
+ipcMain.handle("shell:run", async (_event, payload: { command: string; cwd?: string }) => {
+  const command = payload?.command?.trim();
+  if (!command) return { ok: false, code: -1, output: "Command is empty." };
+  const cwd = payload.cwd && existsSync(payload.cwd) ? payload.cwd : process.cwd();
+  if (platform() === "win32") {
+    return runCommandCapture("powershell.exe", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], cwd, 30000);
+  }
+  return runCommandCapture(process.env.SHELL || "/bin/bash", ["-lc", command], cwd, 30000);
+});
+
+ipcMain.handle("project:changes", async (_event, folder: string) => {
+  if (!folder || !existsSync(folder)) return { ok: true, changes: { files: [], diff: "", isGitRepo: false } };
+  const gitDir = join(folder, ".git");
+  if (!existsSync(gitDir)) return { ok: true, changes: { files: [], diff: "", isGitRepo: false } };
+  const status = await runCommandCapture("git", ["status", "--short"], folder, 10000);
+  if (status.output.includes("fatal:")) return { ok: true, changes: { files: [], diff: "", isGitRepo: false } };
+  const diff = await runCommandCapture("git", ["diff", "--", "."], folder, 10000);
+  const rawLines = status.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 40);
+  const files = rawLines.map((line) => {
+    const indexStatus = line[0] || " ";
+    const workTreeStatus = line[1] || " ";
+    const filePath = line.slice(3);
+    let status = "modified";
+    if (indexStatus === "A" || workTreeStatus === "A") status = "added";
+    else if (indexStatus === "D" || workTreeStatus === "D") status = "deleted";
+    else if (indexStatus === "R" || workTreeStatus === "R") status = "renamed";
+    else if (indexStatus === "?" && workTreeStatus === "?") status = "untracked";
+    else if (indexStatus === "M" || workTreeStatus === "M") status = "modified";
+    else if (indexStatus === "C" || workTreeStatus === "C") status = "copied";
+    return { path: filePath, status };
+  });
+  return { ok: true, changes: { files, diff: diff.output.slice(0, 12000), isGitRepo: true } };
+});
+
+ipcMain.handle("chat:export", async (_event, chat: Chat) => {
+  const result = await dialog.showSaveDialog(mainWindow!, {
+    defaultPath: `${safeFileName(chat?.title || "mimo-session")}.json`,
+    filters: [{ name: "MiMo session", extensions: ["json"] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false, error: "Canceled." };
+  writeFileSync(result.filePath, JSON.stringify(chat, null, 2), "utf8");
+  return { ok: true, path: result.filePath };
+});
+
+ipcMain.handle("chat:import", async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ["openFile"],
+    filters: [{ name: "MiMo session", extensions: ["json"] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false, error: "Canceled." };
+  try {
+    const chat = JSON.parse(readFileSync(result.filePaths[0], "utf8"));
+    return { ok: true, chat };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("config:read", (_event, folder: string) => {
   const file = projectConfigPath(folder);
   if (!file || !existsSync(file)) return { ok: true, config: {}, raw: "" };
@@ -176,6 +263,8 @@ ipcMain.handle("mimo:check", async () => {
 ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appSettings: AppSettings; extraFiles: string[] }) => {
   try {
     console.log("[main] mimo:run called, message:", payload.message);
+    lastRunChatId = payload.chat?.id || "";
+    lastRunMessage = payload.message || "";
     const args = ["run", "--format", "json", "--dangerously-skip-permissions"];
     const s = { ...defaultAppSettings, ...payload.appSettings };
     if (s.agent) args.push("--agent", s.agent);
@@ -183,8 +272,36 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
     const hasAssistantReply = payload.chat.messages?.some(m => m.role === "assistant" && m.text.trim());
     if (hasAssistantReply) args.push("--continue");
     if (payload.chat.title) args.push("--title", payload.chat.title);
-    for (const f of payload.extraFiles || []) { if (f.trim()) args.push("--file", f.trim()); }
-    args.push(payload.message);
+    let finalMessage = payload.message;
+    const projectFolder = payload.chat.folder || process.cwd();
+    const validFiles = (payload.extraFiles || []).map((f) => {
+      if (!f || typeof f !== "string") return false;
+      const trimmed = f.trim();
+      if (!trimmed) return false;
+      const candidate = existsSync(trimmed) ? trimmed : join(projectFolder, trimmed.replace(/^@/, ""));
+      try { return existsSync(candidate) ? candidate : false; } catch { return false; }
+    }).filter((f): f is string => typeof f === "string");
+    if (validFiles.length > 0) {
+      finalMessage = stripAttachedFileMentions(finalMessage, validFiles, projectFolder);
+      const fileBlocks: string[] = [];
+      for (const f of validFiles) {
+        const trimmed = f.trim();
+        try {
+          const content = readFileSync(trimmed, "utf8");
+          let relPath = trimmed;
+          try { relPath = relative(projectFolder, trimmed).replace(/\\/g, "/"); } catch {}
+          const lang = (trimmed.split(".").pop() || "").toLowerCase();
+          fileBlocks.push(`<file path="${relPath}">\n\`\`\`${lang}\n${content}\n\`\`\`\n</file>`);
+        } catch (e) {
+          console.warn("[main] could not read file:", trimmed, e);
+        }
+      }
+      if (fileBlocks.length > 0) {
+        if (!finalMessage.trim()) finalMessage = "Use the attached file(s) as context.";
+        finalMessage = `${finalMessage}\n\n<attached_files>\n${fileBlocks.join("\n\n")}\n</attached_files>`;
+      }
+    }
+    args.push(finalMessage);
     console.log("[main] mimo:run args:", args);
     return runMimo(args, payload.chat.folder || process.cwd(), true);
   } catch (e) {
@@ -215,53 +332,161 @@ ipcMain.handle("terminal:create", (_event, payload: { terminalId: string; cwd?: 
   if (terminalProcesses.has(terminalId)) return { ok: true };
 
   const cwd = payload.cwd && existsSync(payload.cwd) ? payload.cwd : process.cwd();
-  const child = spawnInteractiveShell(cwd);
-  terminalProcesses.set(terminalId, child);
+  const shell = platform() === "win32" ? "powershell.exe" : (process.env.SHELL || "/bin/bash");
+  const shellArgs = platform() === "win32"
+    ? ["-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass"]
+    : ["-il"];
+  const ptyInstance = pty.spawn(shell, shellArgs, {
+    name: "xterm-256color",
+    cols: 80,
+    rows: 24,
+    cwd,
+    env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" } as Record<string, string>
+  });
+  terminalProcesses.set(terminalId, ptyInstance);
 
-  child.stdout.on("data", (d: Buffer) => {
-    mainWindow?.webContents.send("terminal:data", { terminalId, data: d.toString() });
+  ptyInstance.onData((data: string) => {
+    mainWindow?.webContents.send("terminal:data", { terminalId, data });
   });
-  child.stderr.on("data", (d: Buffer) => {
-    mainWindow?.webContents.send("terminal:data", { terminalId, data: d.toString() });
-  });
-  child.on("error", (e) => {
+  ptyInstance.onExit(({ exitCode }: { exitCode: number }) => {
     terminalProcesses.delete(terminalId);
-    mainWindow?.webContents.send("terminal:data", { terminalId, data: `${e.message}\r\n` });
-    mainWindow?.webContents.send("terminal:exit", { terminalId, code: -1 });
-  });
-  child.on("close", (code) => {
-    terminalProcesses.delete(terminalId);
-    mainWindow?.webContents.send("terminal:exit", { terminalId, code: code ?? 0, cwd });
+    mainWindow?.webContents.send("terminal:exit", { terminalId, code: exitCode });
   });
 
   return { ok: true };
 });
 
 ipcMain.handle("terminal:input", (_event, payload: { terminalId: string; data: string }) => {
-  const child = terminalProcesses.get(payload?.terminalId);
-  if (!child || child.stdin.destroyed) return { ok: false };
-  child.stdin.write(payload.data);
+  const pty = terminalProcesses.get(payload?.terminalId);
+  if (!pty) return { ok: false };
+  pty.write(payload.data);
   return { ok: true };
 });
 
-ipcMain.handle("terminal:resize", () => {
+ipcMain.handle("terminal:resize", (_event, payload: { terminalId: string; cols: number; rows: number }) => {
+  const pty = terminalProcesses.get(payload?.terminalId);
+  if (!pty) return { ok: false };
+  try { pty.resize(payload.cols, payload.rows); } catch {}
   return { ok: true };
 });
 
 ipcMain.handle("terminal:stop", (_event, terminalId: string) => {
-  const child = terminalProcesses.get(terminalId);
-  if (!child) return { ok: true };
-  killProcessTree(child);
+  const pty = terminalProcesses.get(terminalId);
+  if (!pty) return { ok: true };
+  try { pty.kill(); } catch {}
   terminalProcesses.delete(terminalId);
   mainWindow?.webContents.send("terminal:exit", { terminalId, code: null });
   return { ok: true };
 });
 
+ipcMain.handle("shell:openPath", async (_event, filePath: string) => {
+  if (!filePath) return { ok: false };
+  try {
+    if (existsSync(filePath)) {
+      const stat = statSync(filePath);
+      if (stat.isDirectory()) {
+        shell.showItemInFolder(filePath);
+      } else {
+        shell.openPath(filePath);
+      }
+    } else {
+      shell.showItemInFolder(dirname(filePath));
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
+
 // ── helpers ──
+
+ipcMain.handle("shell:openExternal", async (_event, url: string) => {
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) return { ok: false };
+    await shell.openExternal(parsed.toString());
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+});
 
 function projectConfigPath(folder: string) {
   if (!folder) return "";
   return join(folder, ".mimocode", "mimocode.json");
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "mimo-session";
+}
+
+function stripAttachedFileMentions(message: string, files: string[], projectFolder: string) {
+  let output = message;
+  for (const file of files) {
+    const variants = new Set<string>();
+    const absolute = file.replace(/\\/g, "/");
+    const absoluteWin = file.replace(/\//g, "\\");
+    let relativePath = "";
+    try { relativePath = relative(projectFolder, file).replace(/\\/g, "/"); } catch {}
+    for (const value of [file, absolute, absoluteWin, relativePath, relativePath.replace(/\//g, "\\")]) {
+      if (!value) continue;
+      variants.add(`@${value}`);
+      variants.add(value.startsWith("@") ? value : `@${value.replace(/^@/, "")}`);
+    }
+    for (const variant of variants) {
+      output = output.split(variant).join("");
+    }
+  }
+  return output
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function scanProjectFiles(folder: string) {
+  const ignored = new Set(["node_modules", ".git", "dist", "release", ".vite"]);
+  const files: { path: string; name: string }[] = [];
+  const visit = (dir: string) => {
+    if (files.length >= 5000) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (ignored.has(entry.name)) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(full);
+      } else if (entry.isFile()) {
+        const rel = relative(folder, full).replace(/\\/g, "/");
+        const size = statSync(full).size;
+        if (size < 2_000_000) files.push({ path: rel, name: entry.name });
+      }
+    }
+  };
+  visit(folder);
+  return files;
+}
+
+function runCommandCapture(command: string, args: string[], cwd: string, timeoutMs: number) {
+  return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
+    const child = spawn(command, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let output = "";
+    const timer = setTimeout(() => {
+      killProcessTree(child);
+      resolve({ ok: false, code: -1, output: `${output}\nCommand timed out.`.trim() });
+    }, timeoutMs);
+    child.stdout.on("data", (d: Buffer) => { output += d.toString(); });
+    child.stderr.on("data", (d: Buffer) => { output += d.toString(); });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, code: -1, output: e.message });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: (code ?? 0) === 0, code: code ?? 0, output });
+    });
+  });
 }
 
 function writeProjectConfig(folder: string, appSettings: AppSettings) {
@@ -326,7 +551,7 @@ function findMimoBinary(): string | null {
   return null;
 }
 
-function runMimo(args: string[], cwd: string, streamToWindow = true) {
+function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = ""): Promise<{ ok: boolean; code: number; output: string }> {
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
@@ -336,27 +561,66 @@ function runMimo(args: string[], cwd: string, streamToWindow = true) {
     return Promise.resolve({ ok: false, code: -1, output: msg });
   }
 
-  const child = spawn(binary, args, {
-    cwd,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-  child.stdin.end();
-  if (activeProcess) activeProcess.kill();
-  activeProcess = child;
-  let fullText = "";
-  let stderrText = "";
+  const MAX_RETRIES = 8;
+  const RETRY_DELAYS = [2000, 5000, 10000, 20000, 30000, 45000, 60000, 90000];
+  const STALL_TIMEOUT_MS = 12 * 60 * 1000;
+  const NETWORK_ERRORS = [
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "ECONNREFUSED",
+    "ENOTFOUND",
+    "EPIPE",
+    "EAI_AGAIN",
+    "Socket Hang Up",
+    "network",
+    "timeout",
+    "fetch",
+    "connection",
+    "temporarily unavailable",
+    "rate limit",
+    "overloaded",
+    "gateway",
+    "502",
+    "503",
+    "504"
+  ];
 
-  console.log("[mimo] spawned pid:", child.pid);
+  function isNetworkError(stderr: string, code: number): boolean {
+    if (code !== 0 && code !== -1) return true;
+    const lower = stderr.toLowerCase();
+    return NETWORK_ERRORS.some((e) => lower.includes(e.toLowerCase()));
+  }
+
+  return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
+    const child = spawn(binary, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    child.stdin.end();
+    if (activeProcess) activeProcess.kill();
+    activeProcess = child;
+    let fullText = accumulatedOutput;
+    let stderrText = "";
+
+    console.log("[mimo] spawned pid:", child.pid, "retry:", retryCount);
 
   let lineBuffer = "";
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let settled = false;
-  let resolveRun: ((value: { ok: boolean; code: number; output: string }) => void) | undefined;
+  let lastEventTime = Date.now();
+  let expectingMoreSteps = false;
+  let stepCount = 0;
+  let resolveInner: ((value: { ok: boolean; code: number; output: string }) => void) | undefined;
 
   const clearIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = undefined;
+  };
+  const clearHeartbeat = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
   };
   const flushLineBuffer = () => {
     if (!lineBuffer.trim()) return;
@@ -371,85 +635,142 @@ function runMimo(args: string[], cwd: string, streamToWindow = true) {
     if (settled) return;
     settled = true;
     clearIdleTimer();
+    clearHeartbeat();
     flushLineBuffer();
     if (shouldKill && !child.killed) child.kill();
     activeProcess = undefined;
-    resolveRun?.({ ok: code === 0, code, output: fullText || stderrText });
+
+    const hasOutput = fullText.trim().length > 0;
+    const shouldRetry = !hasOutput && retryCount < MAX_RETRIES && (code !== 0 || isNetworkError(stderrText, code));
+
+    if (shouldRetry) {
+      const delay = RETRY_DELAYS[retryCount] || 30000;
+      console.log(`[mimo] retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}), code: ${code}`);
+      if (streamToWindow) {
+        mainWindow?.webContents.send("mimo:output", { type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
+        mainWindow?.webContents.send("mimo:output", { type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
+      }
+      setTimeout(() => {
+        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText).then((r) => {
+          resolveInner?.(r);
+          return r;
+        }));
+      }, delay);
+      return;
+    }
+
+    if (code !== 0 && streamToWindow) {
+      const lastMsg = activeChatSnapshot();
+      mainWindow?.webContents.send("mimo:interrupted", {
+        chatId: lastMsg?.chatId || "",
+        message: lastMsg?.message || "",
+        code,
+        stderr: (stderrText || (hasOutput ? "Response was interrupted before completion." : "")).slice(0, 500),
+        attempt: retryCount + 1,
+        maxRetries: MAX_RETRIES
+      });
+    }
+
+    resolveInner?.({ ok: code === 0, code, output: fullText || stderrText });
   };
-  const scheduleTextIdleFinish = () => {
+  resolveInner = resolve;
+
+  const markActivity = () => {
+    lastEventTime = Date.now();
     clearIdleTimer();
     idleTimer = setTimeout(() => {
-      if (fullText.trim()) finishRun(0, true);
-    }, 2500);
+      if (!settled && streamToWindow) {
+        mainWindow?.webContents.send("mimo:output", {
+          type: "activity",
+          text: "Still waiting for MiMo...",
+          detail: "Keeping the connection alive on a slow network"
+        });
+      }
+    }, 60000);
   };
 
-  child.stdout.on("data", (d: Buffer) => {
-    lineBuffer += d.toString();
-    const parts = lineBuffer.split("\n");
-    lineBuffer = parts.pop() || "";
-    for (const raw of parts) {
-      const line = raw.replace(/\r$/, "");
-      if (!line) continue;
-      try {
-        const event = JSON.parse(line);
-        const text = extractOutputText(event);
-        const activity = summarizeActivityEvent(event);
-        if (activity && streamToWindow) {
-          mainWindow?.webContents.send("mimo:output", { type: "activity", text: activity });
+  heartbeatTimer = setInterval(() => {
+    if (settled) { clearHeartbeat(); return; }
+    const elapsed = Date.now() - lastEventTime;
+    if (child.killed || child.exitCode !== null) {
+      finishRun(child.exitCode ?? 0);
+      return;
+    }
+    if (elapsed > STALL_TIMEOUT_MS && !expectingMoreSteps) {
+      console.log("[mimo] heartbeat: stalled for too long, marking as interrupted");
+      stderrText ||= `No response from MiMo for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes.`;
+      finishRun(-2, true);
+    }
+  }, 15000);
+
+    child.stdout.on("data", (d: Buffer) => {
+      lineBuffer += d.toString();
+      const parts = lineBuffer.split("\n");
+      lineBuffer = parts.pop() || "";
+      for (const raw of parts) {
+        const line = raw.replace(/\r$/, "");
+        if (!line) continue;
+        try {
+          const event = JSON.parse(line);
+          const text = extractOutputText(event);
+          const activity = summarizeActivityEvent(event);
+          lastEventTime = Date.now();
+
+          const evType = String(event.type || "").toLowerCase();
+          if (evType === "step_finish") {
+            const reason = String(event.part?.reason || "").toLowerCase();
+            expectingMoreSteps = reason === "tool-calls" || reason === "tool_use";
+          } else if (evType === "step_start") {
+            expectingMoreSteps = false;
+            stepCount++;
+          }
+
+          if (activity && streamToWindow) {
+            mainWindow?.webContents.send("mimo:output", { type: "activity", ...activity, step: stepCount });
+          }
+          if (text) {
+            fullText += text;
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text });
+          }
+          if (isCompletionEvent(event)) {
+            finishRun(0, true);
+          } else {
+            markActivity();
+          }
+        } catch {
+          lastEventTime = Date.now();
+          if (!line.includes("<system-reminder>") && !line.includes("</system-reminder>")) {
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text: line + "\n" });
+            fullText += line + "\n";
+          }
+          markActivity();
         }
-        if (text) {
-          fullText += text;
-          if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text });
-          scheduleTextIdleFinish();
-        }
-        if (isCompletionEvent(event)) {
-          finishRun(0, true);
-        }
-      } catch {
-        if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text: line + "\n" });
-        fullText += line + "\n";
-        scheduleTextIdleFinish();
       }
-    }
-  });
+    });
 
-  child.stderr.on("data", (d: Buffer) => {
-    const t = d.toString();
-    stderrText += t;
-    console.log("[mimo] stderr:", t);
-    const permMatch = t.match(/permission requested:\s*(\S+)\s*\(([^)]+)\)/);
-    if (permMatch && streamToWindow) {
-      mainWindow?.webContents.send("mimo:permission", { type: permMatch[1], target: permMatch[2], raw: t });
-    } else if (streamToWindow) {
-      mainWindow?.webContents.send("mimo:output", { type: "activity", text: summarizeStderrActivity(t) });
-    }
-  });
+    child.stderr.on("data", (d: Buffer) => {
+      const t = d.toString();
+      stderrText += t;
+      lastEventTime = Date.now();
+      console.log("[mimo] stderr:", t);
+      const permMatch = t.match(/permission requested:\s*(\S+)\s*\(([^)]+)\)/);
+      if (permMatch && streamToWindow) {
+        mainWindow?.webContents.send("mimo:permission", { type: permMatch[1], target: permMatch[2], raw: t });
+      } else if (streamToWindow) {
+        mainWindow?.webContents.send("mimo:output", { type: "activity", text: summarizeStderrActivity(t) });
+      }
+      markActivity();
+    });
 
-  return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
-    resolveRun = resolve;
-    child.on("error", (e) => { console.log("[mimo] error:", e.message); stderrText ||= e.message; finishRun(-1); });
+    child.on("error", (e) => {
+      console.log("[mimo] error:", e.message);
+      stderrText ||= e.message;
+      finishRun(-1);
+    });
     child.on("close", (code) => {
       console.log("[mimo] close code:", code, "fullText:", fullText.slice(0, 200));
       finishRun(code ?? 0);
     });
-  });
-}
-
-function spawnInteractiveShell(cwd: string) {
-  if (platform() === "win32") {
-    return spawn("powershell.exe", ["-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass"], {
-      cwd,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" }
-    });
-  }
-  const shell = process.env.SHELL || "/bin/bash";
-  return spawn(shell, ["-il"], {
-    env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
-    cwd,
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"]
   });
 }
 
@@ -468,6 +789,15 @@ function killProcessTree(child: ChildProcessWithoutNullStreams) {
 function extractOutputText(event: any): string {
   if (!event || typeof event !== "object") return "";
   const type = String(event.type || event.event || event.name || "").toLowerCase();
+  if (type === "text" || type.includes("delta") || type.includes("message")) {
+    const part = event.part;
+    if (part && typeof part.text === "string") {
+      const text = part.text;
+      if (text.includes("<system-reminder>") || text.includes("</system-reminder>")) return "";
+      return text;
+    }
+  }
+  if (type === "tool_use" || type === "step_start" || type === "step_finish") return "";
   const activityOnly =
     type.includes("tool") ||
     type.includes("call") ||
@@ -499,31 +829,136 @@ function extractOutputText(event: any): string {
   return "";
 }
 
-function summarizeActivityEvent(event: any): string {
+function summarizeActivityEvent(event: any): { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string } | "" {
   if (!event || typeof event !== "object") return "";
   const type = String(event.type || event.event || event.name || "").toLowerCase();
-  const tool = event.tool || event.tool_name || event.name || event.action || event.command?.name;
-  const command = event.command || event.cmd || event.args?.command || event.input?.command;
-  const path = event.path || event.file || event.target || event.input?.path;
-  const status = event.status || event.state;
+  const part = event.part || {};
+  const partType = String(part.type || "").toLowerCase();
+  const tool = part.tool || event.tool || event.tool_name || event.name || event.action || event.command?.name;
+  const status = part.state?.status || event.status || event.state;
+  const input = part.state?.input || event.input;
+  const output = part.state?.output || event.output;
+  const metadata = part.state?.metadata || {};
 
-  if (type.includes("text") || type.includes("delta") || type.includes("message")) return "";
-  if (type.includes("permission")) return `Permission requested${path ? `: ${path}` : ""}`;
-  if (type.includes("tool") || type.includes("call") || type.includes("function")) {
-    if (typeof command === "string") return `Running command: ${command}`;
-    if (typeof tool === "string") return `Using ${tool}`;
-    return "Using a tool";
+  if (type === "text" || type.includes("delta") || type.includes("message") || type.includes("thinking")) return "";
+
+  if (type === "tool_use") {
+    const toolName = tool || "tool";
+    let text = toolName;
+    let detail = "";
+    let code: string | undefined;
+    let codeLang: string | undefined;
+    let oldCode: string | undefined;
+    let newCode: string | undefined;
+    let editFilePath: string | undefined;
+
+    const extToLang = (p: string) => {
+      const ext = (p.split(".").pop() || "").toLowerCase();
+      const map: Record<string, string> = { ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", vue: "html", py: "python", php: "php", css: "css", scss: "css", json: "json", md: "markdown", html: "html", sh: "bash", bash: "bash", rs: "rust", go: "go", java: "java", rb: "ruby", c: "c", cpp: "cpp", h: "c" };
+      return map[ext] || ext;
+    };
+
+    if (toolName === "write" || toolName === "create") {
+      const filePath = input?.filePath || metadata?.filepath || "";
+      const preview = input?.content ? input.content.slice(0, 200) : "";
+      text = `write ${filePath ? filePath.split(/[/\\]/).pop() : ""}`;
+      detail = filePath;
+      if (preview) detail += `\n${preview}${input.content.length > 200 ? "..." : ""}`;
+      if (output) detail += `\n✓ ${output}`;
+      if (input?.content) {
+        code = input.content;
+        codeLang = extToLang(filePath);
+      }
+    } else if (toolName === "edit") {
+      const filePath = input?.filePath || metadata?.filepath || "";
+      const oldStr = input?.oldString || "";
+      const newStr = input?.newString || "";
+      text = `edit ${filePath ? filePath.split(/[/\\]/).pop() : ""}`;
+      detail = filePath;
+      if (output) detail += `\n✓ ${output}`;
+      editFilePath = filePath;
+      if (oldStr) oldCode = oldStr;
+      if (newStr) newCode = newStr;
+    } else if (toolName === "read") {
+      const filePath = input?.filePath || input?.path || "";
+      text = `read ${filePath ? filePath.split(/[/\\]/).pop() : ""}`;
+      detail = filePath;
+      if (output) {
+        const lines = output.split("\n");
+        const preview = lines.slice(0, 8).join("\n");
+        detail += `\n${preview}${lines.length > 8 ? `\n... (${lines.length} lines)` : ""}`;
+      }
+      if (output) {
+        code = output;
+        codeLang = extToLang(filePath);
+      }
+    } else if (toolName === "bash" || toolName === "command") {
+      const cmd = input?.command || "";
+      text = "bash";
+      detail = cmd;
+      if (output) {
+        const lines = output.split("\n");
+        const preview = lines.slice(0, 6).join("\n");
+        detail += `\n${preview}${lines.length > 6 ? `\n... (${lines.length} lines)` : ""}`;
+      }
+      if (cmd) {
+        code = cmd;
+        codeLang = "bash";
+      }
+    } else if (toolName === "search" || toolName === "grep" || toolName === "find" || toolName === "glob") {
+      const query = input?.query || input?.pattern || input?.keyword || "";
+      text = `search ${query}`;
+      detail = output ? output.split("\n").slice(0, 10).join("\n") : "";
+      if (output) {
+        code = output;
+        codeLang = "text";
+      }
+    } else if (toolName === "shell") {
+      const cmd = input?.command || "";
+      text = "shell";
+      detail = cmd;
+      if (output) detail += `\n${output.split("\n").slice(0, 5).join("\n")}`;
+      if (cmd) {
+        code = cmd;
+        codeLang = "bash";
+      }
+    } else if (toolName === "permission") {
+      text = "permission requested";
+      detail = input?.target || input?.type || "";
+    } else {
+      if (input && typeof input === "object") {
+        const parts = [];
+        if (input.filePath) parts.push(input.filePath);
+        if (input.command) parts.push(input.command);
+        if (input.query) parts.push(input.query);
+        if (input.path) parts.push(input.path);
+        detail = parts.join(" ");
+      }
+      if (output) detail += `\n✓ ${String(output).slice(0, 150)}`;
+    }
+
+    return { text, detail, code, codeLang, oldCode, newCode, editFilePath };
   }
-  if (type.includes("bash") || type.includes("shell") || type.includes("command")) {
-    return typeof command === "string" ? `Running command: ${command}` : "Running command";
+
+  if (type === "step_start") return { text: "Starting step", detail: "" };
+  if (type === "step_finish") {
+    const reason = part.reason || "";
+    const tokens = part.tokens;
+    let detail = reason;
+    if (tokens) {
+      const parts = [];
+      if (tokens.input) parts.push(`${tokens.input} in`);
+      if (tokens.output) parts.push(`${tokens.output} out`);
+      if (tokens.reasoning) parts.push(`${tokens.reasoning} think`);
+      if (parts.length) detail = parts.join(" · ");
+    }
+    if (reason === "tool-calls") return { text: "Processing tool results...", detail };
+    return { text: "Step complete", detail };
   }
-  if (type.includes("file") || type.includes("edit") || type.includes("write")) {
-    return path ? `Updating ${path}` : "Updating files";
-  }
-  if (type.includes("search")) return "Searching project";
-  if (type.includes("read")) return path ? `Reading ${path}` : "Reading files";
-  if (type.includes("start")) return "Starting task";
-  if (status && typeof status === "string") return status;
+
+  if (type.includes("permission")) return { text: "Permission requested", detail: input?.target || input?.path || "" };
+
+  if (status && typeof status === "string") return { text: status, detail: "" };
   return "";
 }
 
@@ -537,7 +972,7 @@ function summarizeStderrActivity(text: string): string {
 function isCompletionEvent(event: any): boolean {
   if (!event || typeof event !== "object") return false;
   const type = String(event.type || event.event || event.name || "").toLowerCase();
-  return [
+  if ([
     "done",
     "complete",
     "completed",
@@ -546,5 +981,18 @@ function isCompletionEvent(event: any): boolean {
     "turn_complete",
     "response.completed",
     "assistant_message_stop"
-  ].includes(type);
+  ].includes(type)) return true;
+  if (type === "step_finish") {
+    const reason = String(event.part?.reason || "").toLowerCase();
+    return reason === "stop" || reason === "end_turn" || reason === "max_tokens";
+  }
+  return false;
+}
+
+let lastRunChatId = "";
+let lastRunMessage = "";
+
+function activeChatSnapshot() {
+  if (!lastRunChatId) return null;
+  return { chatId: lastRunChatId, message: lastRunMessage };
 }

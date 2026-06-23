@@ -28,8 +28,20 @@ const { t } = useI18n();
             type="button"
             @click="studio.selectChat(chat.id)"
           >
-            <Pencil :size="13" />
-            <span class="session-title">{{ chat.title }}</span>
+            <Pencil :size="13" class="edit-icon" @click.stop="studio.startEditChat(chat.id)" />
+            <template v-if="studio.editingChatId === chat.id">
+              <input
+                class="chat-title-input"
+                v-model="studio.editingChatTitle"
+                @keydown.enter="studio.saveEditChat"
+                @keydown.escape="studio.cancelEditChat"
+                @blur="studio.saveEditChat"
+                @click.stop
+              />
+            </template>
+            <template v-else>
+              <span class="session-title">{{ chat.title }}</span>
+            </template>
             <span class="session-time">{{ studio.relativeTime(chat.updatedAt) }}</span>
           </button>
           <button class="delete-btn" type="button" @click="studio.deleteConfirmId = chat.id">
@@ -39,7 +51,10 @@ const { t } = useI18n();
 
         <div v-if="studio.deleteConfirmId && group.items.some((chat) => chat.id === studio.deleteConfirmId)" class="delete-confirm">
           <span>{{ t("confirmDelete") }}</span>
-          <button type="button" @click="studio.deleteChat(studio.deleteConfirmId)">{{ t("deleteChat") }}</button>
+          <div class="delete-confirm-actions">
+            <button type="button" class="cancel-btn" @click="studio.deleteConfirmId = ''">{{ t("cancel") }}</button>
+            <button type="button" @click="studio.deleteChat(studio.deleteConfirmId)">{{ t("deleteChat") }}</button>
+          </div>
         </div>
       </div>
 
