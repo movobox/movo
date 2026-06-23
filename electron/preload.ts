@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("studio", {
   pickFolder: () => ipcRenderer.invoke("folder:pick"),
   pickFiles: () => ipcRenderer.invoke("file:pick"),
   listProjectFiles: (folder: string) => ipcRenderer.invoke("project:files", folder),
+  searchFiles: (payload: { fileName: string; projectFolder: string }) => ipcRenderer.invoke("file:search", payload),
   runShellCommand: (payload: unknown) => ipcRenderer.invoke("shell:run", payload),
   getProjectChanges: (folder: string) => ipcRenderer.invoke("project:changes", folder),
   exportChat: (chat: unknown) => ipcRenderer.invoke("chat:export", chat),

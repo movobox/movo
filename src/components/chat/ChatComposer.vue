@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ChevronDown, FileJson, FilePlus, GitFork, Paperclip, Pencil, Play, Square, Trash2, Upload, X } from "@lucide/vue";
-import { ref } from "vue";
+import { ChevronDown, FileJson, GitFork, Paperclip, Pencil, Play, Square, Trash2, Upload } from "@lucide/vue";
+import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 
 const studio = useStudioStore();
 const { t } = useI18n();
 const dragOver = ref(false);
+const inputMirror = ref<HTMLElement | null>(null);
+const composerInput = ref<HTMLTextAreaElement | null>(null);
+const mentionTooltip = ref({ visible: false, text: "", x: 0, y: 0 });
 
 function onDragOver(e: DragEvent) {
   e.preventDefault();
@@ -22,18 +25,15 @@ function onDrop(e: DragEvent) {
   if (!files) return;
   for (const file of files) {
     const path = (file as any).path || file.name;
-    if (path && typeof path === "string") studio.attachMentionFile(path);
+    if (path && typeof path === "string") insertMentionAtCursor(path);
   }
-}
-function removeDroppedFile(idx: number) {
-  studio.droppedFiles.splice(idx, 1);
 }
 async function attachFiles() {
   try {
     const files = await window.studio.pickFiles();
     if (!files || !Array.isArray(files)) return;
     for (const f of files) {
-      if (f && typeof f === "string") studio.attachMentionFile(f);
+      if (f && typeof f === "string") insertMentionAtCursor(f);
     }
   } catch (e) {
     console.error("[composer] attachFiles error:", e);
@@ -46,6 +46,228 @@ function sendFromButton() {
     return;
   }
   void studio.runPrompt();
+}
+
+function insertMentionAtCursor(path: string) {
+  const clean = path.trim();
+  if (!clean) return;
+  if (!studio.droppedFiles.includes(clean)) studio.droppedFiles.push(clean);
+  const mention = `@${fileName(clean)}`;
+  const input = composerInput.value;
+  const value = studio.activeDraft;
+  let start = input?.selectionStart ?? value.length;
+  const end = input?.selectionEnd ?? start;
+  let beforeRaw = value.slice(0, start);
+  const afterRaw = value.slice(end);
+  const pending = beforeRaw.match(/(^|\s)@[^ \n\r\t`"'<>]*$/);
+  if (pending?.index !== undefined) {
+    start = pending.index + (pending[1] ? pending[1].length : 0);
+    beforeRaw = value.slice(0, start);
+  }
+  const prefix = beforeRaw && !/[\s\n]$/.test(beforeRaw) ? " " : "";
+  const suffix = afterRaw && !/^[\s\n]/.test(afterRaw) ? " " : "";
+  const insertion = `${prefix}${mention} `;
+  const nextValue = `${beforeRaw}${insertion}${suffix}${afterRaw}`.replace(/[ \t]{3,}/g, " ");
+  const nextCursor = beforeRaw.length + insertion.length;
+  studio.activeDraft = nextValue;
+  studio.filePickerOpen = false;
+  studio.filePickerQuery = "";
+  void nextTick(() => {
+    input?.focus();
+    input?.setSelectionRange(nextCursor, nextCursor);
+    syncMirrorScroll();
+  });
+}
+
+const highlightedDraft = computed(() => {
+  const source = studio.activeDraft || "";
+  const mentionRe = /@[^ \n\r\t`"'<>]+/g;
+  let html = "";
+  let cursor = 0;
+  for (const match of source.matchAll(mentionRe)) {
+    const start = match.index || 0;
+    const token = match[0];
+    const path = resolveMentionPath(token.slice(1));
+    html += escapeHtml(source.slice(cursor, start));
+    html += `<span class="inline-file-mention" data-mention-path="${escapeHtml(path)}" title="${escapeHtml(path)}">${escapeHtml(token)}</span>`;
+    cursor = start + token.length;
+  }
+  html += escapeHtml(source.slice(cursor));
+  return html;
+});
+
+const draftMentionTooltip = computed(() => {
+  return extractMentions(studio.activeDraft).map(resolveMentionPath).join("\n");
+});
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function syncMirrorScroll() {
+  if (!inputMirror.value || !composerInput.value) return;
+  inputMirror.value.scrollTop = composerInput.value.scrollTop;
+  inputMirror.value.scrollLeft = composerInput.value.scrollLeft;
+}
+
+function handleComposerKeydown(e: KeyboardEvent) {
+  if ((e.key === "Backspace" || e.key === "Delete") && removeMentionFromKey(e)) return;
+  studio.handleComposerKeydown(e);
+}
+
+function handleComposerPaste(e: ClipboardEvent) {
+  const input = composerInput.value;
+  const pasted = e.clipboardData?.getData("text/plain");
+  if (!input || pasted === undefined) return;
+  const cleaned = cleanPastedText(pasted);
+  e.preventDefault();
+  if (!cleaned) return;
+
+  const value = studio.activeDraft;
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const prefix = before && cleaned && !/[\s\n]$/.test(before) && !/^[\s\n.,;:!?)}\]]/.test(cleaned) ? " " : "";
+  const suffix = after && cleaned && !/[\s\n]$/.test(cleaned) && !/^[\s\n.,;:!?)}\]]/.test(after) ? " " : "";
+  const insertion = `${prefix}${cleaned}${suffix}`;
+  const nextValue = `${before}${insertion}${after}`;
+  const nextCursor = before.length + insertion.length - suffix.length;
+  studio.activeDraft = nextValue;
+  void nextTick(() => {
+    input.focus();
+    input.setSelectionRange(nextCursor, nextCursor);
+    studio.updateFilePickerFromDraft();
+    syncMirrorScroll();
+  });
+}
+
+function cleanPastedText(value: string) {
+  const normalized = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/^\n+|\n+$/g, "");
+
+  if (!normalized.includes("\n")) {
+    return normalized.trim().replace(/[ \t]{2,}/g, " ");
+  }
+
+  return normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function removeMentionFromKey(e: KeyboardEvent) {
+  const input = composerInput.value;
+  if (!input) return false;
+  const value = studio.activeDraft;
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+  const ranges = getMentionRanges(value);
+  let deleteStart = start;
+  let deleteEnd = end;
+
+  if (start !== end) {
+    const touched = ranges.filter((range) => rangesOverlap(start, end, range.start, range.end));
+    if (!touched.length) return false;
+    deleteStart = Math.min(start, ...touched.map((range) => range.start));
+    deleteEnd = Math.max(end, ...touched.map((range) => range.end));
+  } else {
+    const current = ranges.find((range) => {
+      if (e.key === "Backspace") {
+        return (start > range.start && start <= range.end) || isCursorAfterMentionWhitespace(value, start, range);
+      }
+      return start >= range.start && start < range.end;
+    });
+    if (!current) return false;
+    deleteStart = current.start;
+    deleteEnd = current.end;
+    if (e.key === "Backspace") deleteEnd = extendOverFollowingSpaces(value, deleteEnd);
+  }
+
+  e.preventDefault();
+  const removedTokens = ranges
+    .filter((range) => rangesOverlap(deleteStart, deleteEnd, range.start, range.end))
+    .map((range) => range.token.slice(1));
+  const nextValue = `${value.slice(0, deleteStart)}${value.slice(deleteEnd)}`.replace(/[ \t]{2,}/g, " ");
+  const nextCursor = Math.min(deleteStart, nextValue.length);
+  studio.activeDraft = nextValue;
+  removeDroppedFilesForTokens(removedTokens);
+  void nextTick(() => {
+    input.setSelectionRange(nextCursor, nextCursor);
+    input.focus();
+    syncMirrorScroll();
+  });
+  return true;
+}
+
+function getMentionRanges(value: string) {
+  return Array.from(value.matchAll(/@[^ \n\r\t`"'<>]+/g)).map((match) => ({
+    start: match.index || 0,
+    end: (match.index || 0) + match[0].length,
+    token: match[0],
+  }));
+}
+
+function rangesOverlap(startA: number, endA: number, startB: number, endB: number) {
+  return startA < endB && endA > startB;
+}
+
+function isCursorAfterMentionWhitespace(value: string, cursor: number, range: { end: number }) {
+  if (cursor <= range.end) return false;
+  return /^[ \t]+$/.test(value.slice(range.end, cursor));
+}
+
+function extendOverFollowingSpaces(value: string, cursor: number) {
+  const match = value.slice(cursor).match(/^[ \t]+/);
+  return cursor + (match?.[0].length || 0);
+}
+
+function removeDroppedFilesForTokens(tokens: string[]) {
+  if (!tokens.length) return;
+  studio.droppedFiles = studio.droppedFiles.filter((file) => !tokens.some((token) => file === token || fileName(file) === token));
+}
+
+function updateMentionTooltip(e: MouseEvent) {
+  const mirror = inputMirror.value;
+  if (!mirror) return;
+  const target = Array.from(mirror.querySelectorAll<HTMLElement>(".inline-file-mention")).find((el) => {
+    const rect = el.getBoundingClientRect();
+    return e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+  });
+  if (!target) {
+    hideMentionTooltip();
+    return;
+  }
+  const text = target.dataset.mentionPath || target.title;
+  mentionTooltip.value = { visible: true, text, x: e.clientX, y: e.clientY };
+}
+
+function hideMentionTooltip() {
+  mentionTooltip.value.visible = false;
+}
+
+function extractMentions(value: string) {
+  return Array.from(value.matchAll(/@([^ \n\r\t`"'<>]+)/g)).map((match) => match[1]);
+}
+
+function fileName(path: string) {
+  return path.split(/[/\\]/).filter(Boolean).pop() || path;
+}
+
+function resolveMentionPath(token: string) {
+  const attached = studio.droppedFiles.find((file) => file === token || fileName(file) === token);
+  if (attached) return attached;
+  const project = studio.projectFiles.find((file) => file.path === token || file.name === token);
+  return project?.path || token;
 }
 </script>
 
@@ -75,37 +297,49 @@ function sendFromButton() {
       </div>
     </div>
 
-    <div v-if="studio.droppedFiles.length" class="dropped-files">
-      <div v-for="(file, idx) in studio.droppedFiles" :key="file" class="dropped-file">
-        <FilePlus :size="11" />
-        <span>{{ file.split(/[/\\]/).pop() }}</span>
-        <button type="button" class="dropped-file-remove" @click="removeDroppedFile(idx)"><X :size="10" /></button>
+    <div
+      class="composer-input-wrap"
+      :dir="studio.draftDir"
+      @mousemove="updateMentionTooltip"
+      @mouseleave="hideMentionTooltip"
+    >
+      <div
+        ref="inputMirror"
+        class="composer-input-mirror"
+        aria-hidden="true"
+        v-html="highlightedDraft"
+      ></div>
+      <textarea
+        ref="composerInput"
+        v-model="studio.activeDraft"
+        :dir="studio.draftDir"
+        :title="draftMentionTooltip"
+        :placeholder="studio.isRunning ? t('nextPlaceholder') : t('placeholder')"
+        rows="2"
+        @keydown="handleComposerKeydown"
+        @paste="handleComposerPaste"
+        @input="studio.updateFilePickerFromDraft"
+        @scroll="syncMirrorScroll"
+      />
+      <div
+        v-if="mentionTooltip.visible"
+        class="mention-path-tooltip"
+        :style="{ left: `${mentionTooltip.x}px`, top: `${mentionTooltip.y}px` }"
+      >
+        {{ mentionTooltip.text }}
       </div>
     </div>
-
-    <textarea
-      v-model="studio.activeDraft"
-      :dir="studio.draftDir"
-      :placeholder="studio.isRunning ? t('nextPlaceholder') : t('placeholder')"
-      rows="2"
-      @keydown="studio.handleComposerKeydown"
-      @input="studio.updateFilePickerFromDraft"
-    />
 
     <div v-if="studio.filePickerOpen && studio.fileSuggestions.length" class="file-picker">
       <button
         v-for="file in studio.fileSuggestions"
         :key="file.path"
         type="button"
-        @click="studio.insertContextFile(file.path)"
+        @click="insertMentionAtCursor(file.path)"
       >
         <span>{{ file.name }}</span>
         <small>{{ file.path }}</small>
       </button>
-    </div>
-
-    <div v-if="studio.selectedContextFiles.length" class="context-file-list">
-      <span v-for="file in studio.selectedContextFiles" :key="file">@{{ file }}</span>
     </div>
 
     <div class="composer-bar">
@@ -140,8 +374,6 @@ function sendFromButton() {
           </button>
           <div v-if="studio.showModelMenu" class="dropdown" @click.stop>
             <button type="button" @click="studio.selectModel('')">MiMo Auto</button>
-            <button type="button" @click="studio.selectModel('claude-sonnet-4-20250514')">Claude Sonnet</button>
-            <button type="button" @click="studio.selectModel('gpt-4o')">GPT-4o</button>
           </div>
         </div>
       </div>

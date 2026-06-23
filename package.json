@@ -4,6 +4,10 @@
   "description": "A simple desktop chat app for MiMo Code.",
   "main": "dist-electron/main.js",
   "type": "module",
+  "author": {
+  "name": "yoosef alipour",
+  "email": "yoosefalipour@gmail.com"
+   },
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",

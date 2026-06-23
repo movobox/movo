@@ -21,11 +21,16 @@ export const useStudioStore = defineStore("studio", () => {
   const isStopping = ref(false);
   const showSettings = ref(false);
   const showTerminal = ref(false);
+  const terminalFloating = ref(false);
   const showAgentMenu = ref(false);
   const showModelMenu = ref(false);
   const deleteConfirmId = ref("");
   const streamingText = ref("");
   const runActivities = ref<{ text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string }[]>([]);
+  type TimelineItem =
+    | { kind: "text"; text: string }
+    | { kind: "activity"; text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
+  const runTimeline = ref<TimelineItem[]>([]);
   const pendingPermissions = ref<PermissionEvent[]>([]);
   const projectFiles = ref<ProjectFile[]>([]);
   const filePickerOpen = ref(false);
@@ -271,15 +276,32 @@ export const useStudioStore = defineStore("studio", () => {
     if (await handleLocalCommand(text)) return;
 
     const contextFiles = extractMentionedFiles(text, projectFiles.value);
-    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
+    const mentions = Array.from(text.matchAll(/@([^\s`"'<>]+)/g)).map((m) => m[1]);
+    const unresolvedMentions = mentions.filter((m) => !contextFiles.some((f) => f === m || f.endsWith("/" + m) || f.endsWith("\\" + m)));
+    const resolvedFromFs: string[] = [];
+    const projectFolder = chat.folder || "";
+    for (const mention of unresolvedMentions) {
+      try {
+        const result = await window.studio.searchFiles({ fileName: mention, projectFolder });
+        if (result.found && result.path) resolvedFromFs.push(result.path);
+      } catch {}
+    }
+    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
     droppedFiles.value = [];
     chat.messages.push(makeMessage("user", text));
     if (chat.messages.length === 1) chat.title = text.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
     streamingText.value = "";
+    runTimeline.value = [];
     const runStartedAt = Date.now();
-    runActivities.value = [{ text: translate("workingOnIt"), detail: "" }];
+    runActivities.value = [{
+      text: "Understanding request",
+      detail: [
+        `Request:\n${text}`,
+        allExtraFiles.length ? `Context files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
+      ].filter(Boolean).join("\n")
+    }];
     pendingPermissions.value = [];
     isRunning.value = true;
     isStopping.value = false;
@@ -339,6 +361,7 @@ export const useStudioStore = defineStore("studio", () => {
       stopRequested = false;
       streamingText.value = "";
       runActivities.value = [];
+      runTimeline.value = [];
       pendingPermissions.value = [];
       await nextTick();
       scrollMessages({ behavior: "smooth" });
@@ -391,7 +414,7 @@ export const useStudioStore = defineStore("studio", () => {
     chat.messages.push(makeMessage("user", `!${command}`));
     chat.draft = "";
     const runStartedAt = Date.now();
-    runActivities.value = [{ text: "Running command", detail: command }];
+    runActivities.value = [{ text: "Running command", detail: `Command:\n${command}\nWorking directory: ${chat.folder || "."}` }];
     isRunning.value = true;
     await nextTick();
     scrollToBottom("smooth");
@@ -528,6 +551,10 @@ export const useStudioStore = defineStore("studio", () => {
     if (runActivities.value.length > 50) {
       runActivities.value.splice(0, runActivities.value.length - 50);
     }
+    runTimeline.value.push({ kind: "activity", text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (runTimeline.value.length > 200) {
+      runTimeline.value.splice(0, runTimeline.value.length - 200);
+    }
   }
 
   async function createTerminal() {
@@ -560,6 +587,11 @@ export const useStudioStore = defineStore("studio", () => {
 
   function openTerminalPanel() {
     ensureTerminal();
+    showTerminal.value = true;
+  }
+
+  function toggleTerminalFloating() {
+    terminalFloating.value = !terminalFloating.value;
     showTerminal.value = true;
   }
 
@@ -613,7 +645,9 @@ export const useStudioStore = defineStore("studio", () => {
 
   function insertContextFile(path: string) {
     const draft = activeDraft.value;
-    const replacement = `@${path} `;
+    const displayName = fileNameFromPath(path);
+    const replacement = `@${displayName} `;
+    if (!droppedFiles.value.includes(path)) droppedFiles.value.push(path);
     activeDraft.value = draft.replace(/(?:^|\s)@([^\s@]*)$/, (match) => {
       const prefix = match.startsWith(" ") ? " " : "";
       return `${prefix}${replacement}`;
@@ -622,11 +656,20 @@ export const useStudioStore = defineStore("studio", () => {
     filePickerQuery.value = "";
   }
 
+  function removeContextFile(path: string) {
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    activeDraft.value = activeDraft.value
+      .replace(new RegExp(`(^|\\s)@${escaped}(?=\\s|$)`, "g"), " ")
+      .replace(/[ \t]{2,}/g, " ")
+      .trimStart();
+    droppedFiles.value = droppedFiles.value.filter((file) => file !== path);
+  }
+
   function attachMentionFile(path: string) {
     const clean = path.trim();
     if (!clean) return;
     if (!droppedFiles.value.includes(clean)) droppedFiles.value.push(clean);
-    const mention = `@${clean}`;
+    const mention = `@${fileNameFromPath(clean)}`;
     if (!activeDraft.value.includes(mention)) {
       activeDraft.value = `${activeDraft.value.trimEnd()} ${mention} `.trimStart();
     }
@@ -791,6 +834,7 @@ export const useStudioStore = defineStore("studio", () => {
   async function hydrate() {
     const settings = await window.studio.getSettings();
     appSettings.value = normalizeAppSettings(settings.app || {});
+    appSettings.value.model = "";
     language.setLanguage(appSettings.value.language || "en");
     chats.value = (settings.chats || []).map((chat) => normalizeChat(chat, translate("untitled")));
     draftChat.value = settings.ui?.draftChat ? normalizeChat(settings.ui.draftChat, translate("untitled")) : null;
@@ -811,6 +855,12 @@ export const useStudioStore = defineStore("studio", () => {
       } else if (event.type === "stdout" && isRunning.value) {
         if (!streamingText.value.trim()) pushRunActivity(translate("writingFinal"));
         streamingText.value += event.text;
+        const last = runTimeline.value[runTimeline.value.length - 1];
+        if (last && last.kind === "text") {
+          last.text += event.text;
+        } else {
+          runTimeline.value.push({ kind: "text", text: event.text });
+        }
         void nextTick(() => scrollMessages({ behavior: "auto" }));
       } else if (event.type === "stderr" && isRunning.value) {
         pushRunActivity(event.text);
@@ -826,10 +876,12 @@ export const useStudioStore = defineStore("studio", () => {
       }
     });
     terminalExitUnsubscribe = window.studio.onTerminalExit(handleTerminalExit);
-    interruptedUnsubscribe = window.studio.onMimoInterrupted((event) => {
-      interruptedRun.value = event;
-      void nextTick(() => scrollMessages({ behavior: "smooth" }));
-    });
+    if (typeof window.studio.onMimoInterrupted === "function") {
+      interruptedUnsubscribe = window.studio.onMimoInterrupted((event) => {
+        interruptedRun.value = event;
+        void nextTick(() => scrollMessages({ behavior: "smooth" }));
+      });
+    }
     checkConnection();
     disconnectTimer = setInterval(checkConnection, 15000);
   }
@@ -867,11 +919,13 @@ export const useStudioStore = defineStore("studio", () => {
     isStopping,
     showSettings,
     showTerminal,
+    terminalFloating,
     showAgentMenu,
     showModelMenu,
     deleteConfirmId,
     streamingText,
     runActivities,
+    runTimeline,
     pendingPermissions,
     projectFiles,
     filePickerOpen,
@@ -906,6 +960,7 @@ export const useStudioStore = defineStore("studio", () => {
     scrollToBottom,
     createTerminal,
     openTerminalPanel,
+    toggleTerminalFloating,
     selectTerminal,
     closeTerminal,
     stopTerminalCommand,
@@ -924,6 +979,7 @@ export const useStudioStore = defineStore("studio", () => {
     denyPermission,
     updateFilePickerFromDraft,
     insertContextFile,
+    removeContextFile,
     attachMentionFile,
     startEdit,
     cancelEdit,
@@ -945,9 +1001,18 @@ export const useStudioStore = defineStore("studio", () => {
 });
 
 function extractMentionedFiles(text: string, files: ProjectFile[]) {
-  const known = new Set(files.map((file) => file.path));
+  const byPath = new Set(files.map((file) => file.path));
+  const byName = new Map(files.map((file) => [file.name, file.path]));
   const matches = text.match(/@([^\s`"'<>]+)/g) || [];
-  return Array.from(new Set(matches.map((match) => match.slice(1)).filter((path) => known.has(path))));
+  return Array.from(new Set(matches.map((match) => {
+    const value = match.slice(1);
+    if (byPath.has(value)) return value;
+    return byName.get(value) || "";
+  }).filter(Boolean)));
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[/\\]/).filter(Boolean).pop() || path;
 }
 
 function fuzzyFiles(files: ProjectFile[], query: string) {
@@ -983,35 +1048,32 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
 
   const lines = [
     `<details class="activity-log-summary">`,
-    `<summary>${formatWorkedDuration(elapsedMs)}</summary>`,
-    ""
+    `<summary><span>${escapeHtml(formatWorkedDuration(elapsedMs))}</span><span class="activity-log-count">${useful.length} step${useful.length === 1 ? "" : "s"}</span></summary>`,
+    `<div class="activity-log-list">`
   ];
-  for (const activity of useful) {
-    const title = activity.detail ? `${activity.text}: ${activity.detail}` : activity.text;
-    lines.push(`- ${title}`);
-    if (activity.editFilePath) lines.push(`  - File: \`${activity.editFilePath}\``);
+  for (const [index, activity] of useful.entries()) {
+    lines.push(`<section class="activity-log-item">`);
+    lines.push(`<div class="activity-log-item-head"><span class="activity-log-index">${index + 1}</span><span class="activity-log-title">${escapeHtml(activity.text)}</span></div>`);
+    if (activity.detail) lines.push(formatActivityDetail(activity.detail));
+    if (activity.editFilePath) lines.push(`<div class="activity-log-file">File: <code>${escapeHtml(activity.editFilePath)}</code></div>`);
     if (activity.code) {
-      lines.push("");
-      lines.push(`\`\`\`${activity.codeLang || "text"}`);
-      lines.push(truncateActivityCode(activity.code));
-      lines.push("```");
-      lines.push("");
+      lines.push(`<pre class="activity-log-code" dir="ltr"><code class="language-${escapeHtml(activity.codeLang || "text")}">${escapeHtml(truncateActivityCode(activity.code))}</code></pre>`);
     }
     if (activity.oldCode || activity.newCode) {
-      lines.push("");
-      lines.push("```diff");
+      const diffLines: string[] = [];
       if (activity.oldCode) {
-        lines.push(...truncateActivityCode(activity.oldCode).split("\n").map((line) => `-${line}`));
+        diffLines.push(...truncateActivityCode(activity.oldCode).split("\n").map((line) => `-${line}`));
       }
       if (activity.newCode) {
-        lines.push(...truncateActivityCode(activity.newCode).split("\n").map((line) => `+${line}`));
+        diffLines.push(...truncateActivityCode(activity.newCode).split("\n").map((line) => `+${line}`));
       }
-      lines.push("```");
-      lines.push("");
+      lines.push(`<pre class="activity-log-code diff" dir="ltr"><code>${escapeHtml(diffLines.join("\n"))}</code></pre>`);
     }
+    lines.push(`</section>`);
   }
+  lines.push(`</div>`);
   lines.push("</details>");
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return lines.join("\n").trim();
 }
 
 function formatWorkedDuration(elapsedMs: number) {
@@ -1026,4 +1088,22 @@ function truncateActivityCode(code: string, maxLines = 40) {
   const lines = code.split("\n");
   if (lines.length <= maxLines) return code;
   return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} more lines)`;
+}
+
+function formatActivityDetail(detail: string) {
+  const lines = detail.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const fileLines = lines.filter((line) => /^[-*]\s+/.test(line) || /^[A-Za-z]:[\\/]/.test(line) || line.includes("/") || line.includes("\\"));
+  if (fileLines.length >= 2 && lines.some((line) => /^Files?:/i.test(line))) {
+    const files = fileLines.map((line) => line.replace(/^[-*]\s+/, ""));
+    return `<div class="activity-log-files">${files.map((file) => `<code>${escapeHtml(file)}</code>`).join("")}</div>`;
+  }
+  return `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

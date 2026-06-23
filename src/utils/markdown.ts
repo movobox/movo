@@ -89,11 +89,16 @@ md.renderer.rules.list_item_open = (tokens, idx, options, env, self) => {
   return defaultListItemOpen(tokens, idx, options, env, self);
 };
 
+function ensureSentenceBreaks(text: string): string {
+  return text.replace(/([.!؟!])\s*(?=[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF])/g, "$1\n\n");
+}
+
 export function renderMarkdown(source: string) {
-  const html = md.render(linkFileMentions(source || ""));
+  const cleaned = ensureSentenceBreaks(source || "");
+  const html = md.render(linkFileMentions(cleaned));
   return DOMPurify.sanitize(html, {
     ADD_ATTR: ["target", "rel", "dir", "class", "type", "data-file-path"],
-    ADD_TAGS: ["details", "summary", "span", "button"],
+    ADD_TAGS: ["details", "summary", "span", "button", "div", "section", "pre", "code"],
     USE_PROFILES: { html: true }
   });
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Maximize2, Plus, Square, Trash2, X } from "@lucide/vue";
+import { Maximize2, PanelRightClose, PanelTopOpen, Plus, Square, Trash2, X } from "@lucide/vue";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
@@ -50,6 +50,7 @@ function terminalTheme() {
 
 function fitRuntime(runtime: TerminalRuntime, terminalId: string) {
   try {
+    if (!runtime.host.offsetWidth || !runtime.host.offsetHeight) return;
     runtime.fit.fit();
     void window.studio.resizeTerminal({
       terminalId,
@@ -59,12 +60,21 @@ function fitRuntime(runtime: TerminalRuntime, terminalId: string) {
   } catch {}
 }
 
+function scheduleFit(terminalId = studio.activeTerminalId) {
+  const runtime = terminalId ? runtimes.get(terminalId) : null;
+  if (!runtime) return;
+  requestAnimationFrame(() => {
+    fitRuntime(runtime, terminalId);
+    requestAnimationFrame(() => fitRuntime(runtime, terminalId));
+  });
+}
+
 function activateTerminal(terminalId: string) {
   studio.selectTerminal(terminalId);
   void nextTick(() => {
     const runtime = runtimes.get(terminalId);
     if (!runtime) return;
-    fitRuntime(runtime, terminalId);
+    scheduleFit(terminalId);
     runtime.terminal.focus();
   });
 }
@@ -109,7 +119,7 @@ function mountRuntime(terminalId: string) {
   const runtime = { terminal, fit, host };
   runtimes.set(terminalId, runtime);
   resizeObserver?.observe(host);
-  fitRuntime(runtime, terminalId);
+  scheduleFit(terminalId);
   if (studio.activeTerminalId === terminalId) terminal.focus();
 }
 
@@ -133,8 +143,13 @@ function fitActiveTerminal() {
   const terminalId = studio.activeTerminalId;
   const runtime = terminalId ? runtimes.get(terminalId) : null;
   if (!runtime) return;
-  fitRuntime(runtime, terminalId);
+  scheduleFit(terminalId);
   runtime.terminal.focus();
+}
+
+function toggleFloating() {
+  studio.toggleTerminalFloating();
+  void nextTick(() => fitActiveTerminal());
 }
 
 watch(
@@ -148,6 +163,11 @@ watch(
     if (!terminalId) return;
     void nextTick(() => activateTerminal(terminalId));
   }
+);
+
+watch(
+  () => studio.terminalFloating,
+  () => void nextTick(fitActiveTerminal)
 );
 
 onMounted(() => {
@@ -170,7 +190,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="terminal-panel">
+  <aside class="terminal-panel" :class="{ floating: studio.terminalFloating }">
     <div class="term-header">
       <div class="term-tabs">
         <div
@@ -190,6 +210,10 @@ onBeforeUnmount(() => {
       </div>
       <button class="term-icon-btn" type="button" :title="t('newTerminal')" @click="studio.createTerminal">
         <Plus :size="14" />
+      </button>
+      <button class="term-icon-btn" type="button" :title="studio.terminalFloating ? 'Dock terminal' : 'Float terminal'" @click="toggleFloating">
+        <PanelRightClose v-if="studio.terminalFloating" :size="13" />
+        <PanelTopOpen v-else :size="13" />
       </button>
       <button class="term-icon-btn" type="button" title="Fit" @click="fitActiveTerminal">
         <Maximize2 :size="13" />

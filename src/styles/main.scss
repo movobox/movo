@@ -634,11 +634,102 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   list-style: none;
 }
 .markdown-body details.activity-log-summary summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
   color: #a1a1aa;
   font-size: 12px;
 }
 .markdown-body details.activity-log-summary[open] summary {
   color: #d4d4d8;
+}
+.activity-log-count {
+  margin-inline-start: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #24242a;
+  color: #71717a;
+  font-size: 11px;
+  font-family: inherit;
+}
+.activity-log-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+.activity-log-item {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid #202026;
+  border-radius: 8px;
+  background: #111116;
+}
+.activity-log-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-log-index {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #22222a;
+  color: #a1a1aa;
+  font-size: 11px;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+.activity-log-title {
+  color: #e4e4e7;
+  font-size: 13px;
+  font-weight: 600;
+}
+.activity-log-detail,
+.activity-log-code {
+  margin: 0;
+  max-height: 220px;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid #23232a;
+  border-radius: 7px;
+  background: #09090b;
+  color: #a1a1aa;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.activity-log-code {
+  color: #d4d4d8;
+  white-space: pre;
+}
+.activity-log-code.diff {
+  color: #cbd5e1;
+}
+.activity-log-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.activity-log-files code,
+.activity-log-file code {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.1);
+  color: #c4b5fd;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-log-file {
+  color: #71717a;
+  font-size: 12px;
 }
 .markdown-body summary::-webkit-details-marker { display: none; }
 .markdown-body summary::before {
@@ -1133,6 +1224,25 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   flex-shrink: 0;
   font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
 }
+.terminal-panel.floating {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 80;
+  width: min(980px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 96px));
+  min-width: min(520px, calc(100vw - 48px));
+  max-width: none;
+  border: 1px solid #2a2a30;
+  border-radius: 10px;
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+.rtl .terminal-panel.floating {
+  right: auto;
+  left: 24px;
+  border: 1px solid #2a2a30;
+}
 .term-header {
   display: flex;
   align-items: center;
@@ -1291,39 +1401,6 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   z-index: 10;
   pointer-events: none;
 }
-.dropped-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 0 8px;
-}
-.dropped-file {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  color: #a5b4fc;
-  font-size: 11px;
-  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
-}
-.dropped-file-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  background: transparent;
-  color: #6b7280;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-.dropped-file-remove:hover { background: rgba(239,68,68,0.15); color: #ef4444; }
-
 .composer-run-status {
   display: flex;
   align-items: center;
@@ -1353,18 +1430,72 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   animation: pulse 1s ease infinite;
 }
 
+.composer-input-wrap {
+  position: relative;
+  min-height: 40px;
+}
+.composer-input-mirror,
 .composer textarea {
   width: 100%;
   min-height: 40px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-input-mirror {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  color: #eee;
+}
+.composer textarea {
+  position: relative;
   resize: none;
   border: 0;
   outline: 0;
   background: transparent;
-  color: #eee;
-  font-size: 14px;
-  line-height: 1.5;
+  color: transparent;
+  caret-color: #f4f4f5;
+  -webkit-text-fill-color: transparent;
 }
 .composer textarea::placeholder { color: #444; }
+.composer textarea:placeholder-shown {
+  color: #444;
+  -webkit-text-fill-color: #444;
+}
+.composer textarea::selection {
+  background: rgba(96, 165, 250, 0.35);
+  color: transparent;
+}
+.inline-file-mention {
+  padding: 1px 2px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #ddd6fe;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  box-shadow: inset 0 0 0 1px rgba(139, 92, 246, 0.32);
+}
+.mention-path-tooltip {
+  position: fixed;
+  z-index: 120;
+  max-width: min(520px, calc(100vw - 24px));
+  transform: translate(10px, -100%);
+  padding: 6px 8px;
+  border: 1px solid #34343a;
+  border-radius: 7px;
+  background: #101014;
+  color: #d4d4d8;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  direction: ltr;
+  text-align: left;
+  pointer-events: none;
+  word-break: break-all;
+}
 
 .file-picker {
   display: grid;
@@ -1393,25 +1524,6 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   min-width: 0;
   overflow: hidden;
   color: #71717a;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.context-file-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.context-file-list span {
-  max-width: 220px;
-  overflow: hidden;
-  padding: 4px 7px;
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: 999px;
-  background: rgba(139, 92, 246, 0.12);
-  color: #c4b5fd;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -128,6 +128,7 @@ declare global {
       pickFolder: () => Promise<string>;
       pickFiles: () => Promise<string[]>;
       listProjectFiles: (folder: string) => Promise<{ ok: boolean; files: ProjectFile[]; error?: string }>;
+      searchFiles: (payload: { fileName: string; projectFolder: string }) => Promise<{ found: boolean; path: string }>;
       runShellCommand: (payload: { command: string; cwd?: string }) => Promise<{ ok: boolean; code: number; output: string }>;
       getProjectChanges: (folder: string) => Promise<{ ok: boolean; changes: ProjectChanges }>;
       exportChat: (chat: Chat) => Promise<{ ok: boolean; path?: string; error?: string }>;

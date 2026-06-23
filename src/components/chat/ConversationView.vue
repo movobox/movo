@@ -115,58 +115,54 @@ function truncateCode(code: string, maxLines = 40): string {
       <div v-if="studio.isRunning" class="chat-msg assistant streaming">
         <div class="avatar ai-av"><Bot :size="15" /></div>
         <div class="msg-content">
-          <div class="activity-feed" v-if="studio.runActivities.length">
-            <div
-              v-for="(activity, index) in studio.runActivities"
-              :key="index"
-              class="activity-row"
-              :class="'activity-' + activityIcon(activity.text)"
-            >
-              <div class="activity-icon">
-                <FileEdit v-if="activityIcon(activity.text) === 'write'" :size="13" />
-                <FileText v-else-if="activityIcon(activity.text) === 'read'" :size="13" />
-                <FileSearch v-else-if="activityIcon(activity.text) === 'search'" :size="13" />
-                <Terminal v-else-if="activityIcon(activity.text) === 'terminal'" :size="13" />
-                <Shield v-else-if="activityIcon(activity.text) === 'shield'" :size="13" />
-                <Bot v-else-if="activityIcon(activity.text) === 'done'" :size="13" />
-                <span v-else class="activity-dot"></span>
+          <template v-if="studio.runTimeline.length">
+            <template v-for="(item, tIdx) in studio.runTimeline" :key="tIdx">
+              <div v-if="item.kind === 'text' && item.text.trim()" class="streaming-output">
+                <MessageContent :text="item.text" :base-folder="studio.activeChat?.folder" />
               </div>
-              <div class="activity-info">
-                <span class="activity-title">{{ activity.text }}</span>
-                <span
-                  v-if="activity.detail"
-                  class="activity-detail"
-                  :class="{ 'activity-file-link': isFilePath(activity.detail) }"
-                  @click="isFilePath(activity.detail) && openInExplorer(activity.detail)"
-                >{{ activity.detail }}</span>
-
-                <div v-if="activity.oldCode || activity.newCode" class="activity-diff">
-                  <div v-if="activity.editFilePath" class="diff-filepath">{{ activity.editFilePath }}</div>
-                  <div v-if="activity.oldCode" class="diff-block diff-removed">
-                    <div class="diff-label">- removed</div>
-                    <pre class="diff-code"><code v-html="hl(truncateCode(activity.oldCode), activity.codeLang || extToLang(activity.editFilePath || ''))"></code></pre>
+              <div v-else-if="item.kind === 'activity'" class="activity-feed">
+                <div class="activity-row" :class="'activity-' + activityIcon(item.text)">
+                  <div class="activity-icon">
+                    <FileEdit v-if="activityIcon(item.text) === 'write'" :size="13" />
+                    <FileText v-else-if="activityIcon(item.text) === 'read'" :size="13" />
+                    <FileSearch v-else-if="activityIcon(item.text) === 'search'" :size="13" />
+                    <Terminal v-else-if="activityIcon(item.text) === 'terminal'" :size="13" />
+                    <Shield v-else-if="activityIcon(item.text) === 'shield'" :size="13" />
+                    <Bot v-else-if="activityIcon(item.text) === 'done'" :size="13" />
+                    <span v-else class="activity-dot"></span>
                   </div>
-                  <div v-if="activity.newCode" class="diff-block diff-added">
-                    <div class="diff-label">+ added</div>
-                    <pre class="diff-code"><code v-html="hl(truncateCode(activity.newCode), activity.codeLang || extToLang(activity.editFilePath || ''))"></code></pre>
+                  <div class="activity-info">
+                    <span class="activity-title">{{ item.text }}</span>
+                    <span
+                      v-if="item.detail"
+                      class="activity-detail"
+                      :class="{ 'activity-file-link': isFilePath(item.detail) }"
+                      @click="isFilePath(item.detail) && openInExplorer(item.detail)"
+                    >{{ item.detail }}</span>
+                    <div v-if="item.oldCode || item.newCode" class="activity-diff">
+                      <div v-if="item.editFilePath" class="diff-filepath">{{ item.editFilePath }}</div>
+                      <div v-if="item.oldCode" class="diff-block diff-removed">
+                        <div class="diff-label">- removed</div>
+                        <pre class="diff-code"><code v-html="hl(truncateCode(item.oldCode), item.codeLang || extToLang(item.editFilePath || ''))"></code></pre>
+                      </div>
+                      <div v-if="item.newCode" class="diff-block diff-added">
+                        <div class="diff-label">+ added</div>
+                        <pre class="diff-code"><code v-html="hl(truncateCode(item.newCode), item.codeLang || extToLang(item.editFilePath || ''))"></code></pre>
+                      </div>
+                    </div>
+                    <div v-else-if="item.code" class="activity-code-block">
+                      <pre class="activity-code"><code v-html="hl(truncateCode(item.code), item.codeLang || 'text')"></code></pre>
+                    </div>
                   </div>
                 </div>
-
-                <div v-else-if="activity.code" class="activity-code-block">
-                  <pre class="activity-code"><code v-html="hl(truncateCode(activity.code), activity.codeLang || 'text')"></code></pre>
-                </div>
               </div>
-            </div>
-          </div>
-          <div v-if="!studio.runActivities.length" class="activity-feed">
+            </template>
+          </template>
+          <div v-else class="activity-feed">
             <div class="activity-row">
               <div class="activity-icon"><span class="activity-dot"></span></div>
               <span>{{ t("workingOnIt") }}</span>
             </div>
-          </div>
-
-          <div v-if="studio.streamingText.trim()" class="streaming-output">
-            <MessageContent :text="studio.streamingText" :base-folder="studio.activeChat?.folder" />
           </div>
 
           <div v-for="perm in studio.pendingPermissions" :key="perm.type + perm.target" class="permission-card">

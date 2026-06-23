@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, watch, FSWatcher } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
@@ -99,6 +100,53 @@ function createWindow() {
   } else {
     mainWindow.loadFile(join(__dirname, "../dist/index.html"));
   }
+  attachContextMenu(mainWindow);
+}
+
+function attachContextMenu(win: BrowserWindow) {
+  win.webContents.on("context-menu", (event, params) => {
+    const isEditable = params.isEditable;
+    const hasSelection = Boolean(params.selectionText?.trim());
+    const canPaste = isEditable;
+    const template: MenuItemConstructorOptions[] = [];
+
+    if (params.linkURL) {
+      template.push(
+        {
+          label: "Open Link",
+          click: () => void shell.openExternal(params.linkURL)
+        },
+        {
+          label: "Copy Link",
+          click: () => clipboard.writeText(params.linkURL)
+        },
+        { type: "separator" }
+      );
+    }
+
+    if (isEditable) {
+      template.push(
+        { label: "Undo", role: "undo" },
+        { label: "Redo", role: "redo" },
+        { type: "separator" },
+        { label: "Cut", role: "cut", enabled: hasSelection },
+        { label: "Copy", role: "copy", enabled: hasSelection },
+        { label: "Paste", role: "paste", enabled: canPaste },
+        { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: canPaste },
+        { type: "separator" },
+        { label: "Select All", role: "selectAll" }
+      );
+    } else {
+      template.push(
+        { label: "Copy", role: "copy", enabled: hasSelection },
+        { label: "Select All", role: "selectAll" }
+      );
+    }
+
+    if (!template.length) return;
+    event.preventDefault();
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
 }
 
 app.whenReady().then(createWindow);
@@ -165,6 +213,28 @@ ipcMain.handle("project:files", async (_event, folder: string) => {
     }
   } catch {}
   return { ok: true, files: scanProjectFiles(folder).slice(0, 5000) };
+});
+
+ipcMain.handle("file:search", async (_event, payload: { fileName: string; projectFolder: string }) => {
+  const { fileName: name, projectFolder } = payload;
+  if (!name) return { found: false, path: "" };
+  const searchDirs = [projectFolder, join(projectFolder, "..")].filter(d => d && existsSync(d));
+  for (const dir of searchDirs) {
+    try {
+      const output = await runCommandCapture(
+        platform() === "win32" ? "powershell.exe" : "find",
+        platform() === "win32"
+          ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Get-ChildItem -Path "${dir}" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq "${name}" } | Select-Object -First 1 -ExpandProperty FullName`]
+          : [dir, "-name", name, "-type", "f", "-print", "-quit"],
+        projectFolder || process.cwd(),
+        8000
+      );
+      if (output.ok && output.output.trim()) {
+        return { found: true, path: output.output.trim().split("\n")[0] };
+      }
+    } catch {}
+  }
+  return { found: false, path: "" };
 });
 
 ipcMain.handle("shell:run", async (_event, payload: { command: string; cwd?: string }) => {
@@ -281,28 +351,18 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
       const candidate = existsSync(trimmed) ? trimmed : join(projectFolder, trimmed.replace(/^@/, ""));
       try { return existsSync(candidate) ? candidate : false; } catch { return false; }
     }).filter((f): f is string => typeof f === "string");
+    const uniqueFiles = uniquePaths(validFiles);
     if (validFiles.length > 0) {
-      finalMessage = stripAttachedFileMentions(finalMessage, validFiles, projectFolder);
-      const fileBlocks: string[] = [];
-      for (const f of validFiles) {
-        const trimmed = f.trim();
-        try {
-          const content = readFileSync(trimmed, "utf8");
-          let relPath = trimmed;
-          try { relPath = relative(projectFolder, trimmed).replace(/\\/g, "/"); } catch {}
-          const lang = (trimmed.split(".").pop() || "").toLowerCase();
-          fileBlocks.push(`<file path="${relPath}">\n\`\`\`${lang}\n${content}\n\`\`\`\n</file>`);
-        } catch (e) {
-          console.warn("[main] could not read file:", trimmed, e);
-        }
-      }
-      if (fileBlocks.length > 0) {
-        if (!finalMessage.trim()) finalMessage = "Use the attached file(s) as context.";
-        finalMessage = `${finalMessage}\n\n<attached_files>\n${fileBlocks.join("\n\n")}\n</attached_files>`;
-      }
+      finalMessage = stripAttachedFileMentions(finalMessage, uniqueFiles, projectFolder);
+      if (!finalMessage.trim()) finalMessage = "Use the attached file(s) as context.";
     }
-    args.push(finalMessage);
-    console.log("[main] mimo:run args:", args);
+    const safeMessage = prepareMimoMessageArg(finalMessage, projectFolder, uniqueFiles.length > 0 || estimateArgLength([...args, finalMessage]) > 12000);
+    args.push(safeMessage.message);
+    const filesToAttach = safeMessage.file ? [safeMessage.file, ...uniqueFiles] : uniqueFiles;
+    for (const f of filesToAttach) {
+      args.push(formatFileArg(f));
+    }
+    console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
     return runMimo(args, payload.chat.folder || process.cwd(), true);
   } catch (e) {
     console.error("[main] mimo:run error:", e);
@@ -420,6 +480,45 @@ function safeFileName(value: string) {
   return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "mimo-session";
 }
 
+function estimateArgLength(args: string[]) {
+  return args.reduce((sum, arg) => sum + arg.length + 3, 0);
+}
+
+function formatFileArg(file: string) {
+  return `--file=${file}`;
+}
+
+function uniquePaths(files: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const file of files) {
+    const key = platform() === "win32" ? file.toLowerCase() : file;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(file);
+  }
+  return result;
+}
+
+function prepareMimoMessageArg(message: string, projectFolder: string, forceFile: boolean) {
+  const trimmed = message.trim();
+  if (!forceFile && trimmed.length <= 8000) return { message: trimmed, file: "" };
+  const promptFile = writeMimoPromptFile(trimmed || "Use the attached file(s) as context.", projectFolder);
+  return {
+    file: promptFile,
+    message: "Read the attached prompt file and follow its instructions. Use the other attached files as context."
+  };
+}
+
+function writeMimoPromptFile(message: string, projectFolder: string) {
+  const tempRoot = join(app.getPath("temp"), "mimo-studio-prompts");
+  mkdirSync(tempRoot, { recursive: true });
+  const projectName = safeFileName(basename(projectFolder || "project"));
+  const file = join(tempRoot, `${projectName}-${Date.now()}.md`);
+  writeFileSync(file, message, "utf8");
+  return file;
+}
+
 function stripAttachedFileMentions(message: string, files: string[], projectFolder: string) {
   let output = message;
   for (const file of files) {
@@ -428,7 +527,7 @@ function stripAttachedFileMentions(message: string, files: string[], projectFold
     const absoluteWin = file.replace(/\//g, "\\");
     let relativePath = "";
     try { relativePath = relative(projectFolder, file).replace(/\\/g, "/"); } catch {}
-    for (const value of [file, absolute, absoluteWin, relativePath, relativePath.replace(/\//g, "\\")]) {
+    for (const value of [file, basename(file), absolute, absoluteWin, relativePath, relativePath.replace(/\//g, "\\")]) {
       if (!value) continue;
       variants.add(`@${value}`);
       variants.add(value.startsWith("@") ? value : `@${value.replace(/^@/, "")}`);
@@ -586,8 +685,10 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   ];
 
   function isNetworkError(stderr: string, code: number): boolean {
+    const clean = stderr.replace(/\u001b\[[0-9;]*m/g, "");
+    if (/file not found|no such file|enoent/i.test(clean)) return false;
     if (code !== 0 && code !== -1) return true;
-    const lower = stderr.toLowerCase();
+    const lower = clean.toLowerCase();
     return NETWORK_ERRORS.some((e) => lower.includes(e.toLowerCase()));
   }
 
@@ -602,6 +703,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     activeProcess = child;
     let fullText = accumulatedOutput;
     let stderrText = "";
+    const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd) : undefined;
 
     console.log("[mimo] spawned pid:", child.pid, "retry:", retryCount);
 
@@ -636,12 +738,14 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     settled = true;
     clearIdleTimer();
     clearHeartbeat();
+    fileActivityWatcher?.close();
     flushLineBuffer();
     if (shouldKill && !child.killed) child.kill();
     activeProcess = undefined;
 
     const hasOutput = fullText.trim().length > 0;
-    const shouldRetry = !hasOutput && retryCount < MAX_RETRIES && (code !== 0 || isNetworkError(stderrText, code));
+    const errorText = `${stderrText}\n${fullText}`;
+    const shouldRetry = !hasOutput && retryCount < MAX_RETRIES && isNetworkError(errorText, code);
 
     if (shouldRetry) {
       const delay = RETRY_DELAYS[retryCount] || 30000;
@@ -774,6 +878,41 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   });
 }
 
+function createFileActivityWatcher(cwd: string) {
+  if (!cwd || !existsSync(cwd)) return undefined;
+  let watcher: FSWatcher | undefined;
+  const seen = new Map<string, number>();
+  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|\.mimocode[\\/]cache)([\\/]|$)/i;
+
+  try {
+    watcher = watch(cwd, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
+      const rel = String(filename).replace(/\\/g, "/");
+      if (!rel || ignored.test(rel)) return;
+      const base = basename(rel);
+      if (!base || base.startsWith(".") && /\.(swp|tmp|lock)$/i.test(base)) return;
+      const nowTs = Date.now();
+      const last = seen.get(rel) || 0;
+      if (nowTs - last < 1500) return;
+      seen.set(rel, nowTs);
+      const action = eventType === "rename" ? "Creating or moving file" : "Writing file";
+      mainWindow?.webContents.send("mimo:output", {
+        type: "activity",
+        text: `${action}: ${base}`,
+        detail: `Path: ${rel}\nDetected from project file changes while MiMo is running`
+      });
+    });
+  } catch (e) {
+    console.warn("[mimo] file activity watcher unavailable:", e);
+  }
+
+  return {
+    close: () => {
+      try { watcher?.close(); } catch {}
+    }
+  };
+}
+
 function killProcessTree(child: ChildProcessWithoutNullStreams) {
   if (!child.pid) {
     child.kill();
@@ -829,7 +968,164 @@ function extractOutputText(event: any): string {
   return "";
 }
 
+function summarizeMimoToolEvent(event: any): { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string } | "" {
+  if (!event || typeof event !== "object") return "";
+  const type = String(event.type || event.event || event.name || "").toLowerCase();
+  const part = event.part || {};
+  const partType = String(part.type || "").toLowerCase();
+  if (type === "text" || type.includes("delta") || type.includes("message") || type.includes("thinking")) return "";
+
+  const input = normalizeToolPayload(part.state?.input || part.input || event.input || event.args || event.arguments || event.command?.args || {});
+  const output = normalizeToolPayload(part.state?.output || part.output || event.output || event.result || {});
+  const metadata = normalizeToolPayload(part.state?.metadata || part.metadata || event.metadata || {});
+  const tool = normalizeToolName(part.tool || part.name || part.tool_name || event.tool || event.tool_name || event.action || event.command?.name);
+  const status = part.state?.status || event.status || event.state?.status || event.state;
+
+  if (type === "step_start") return { text: "Starting step", detail: part.title || part.name || "" };
+  if (type === "step_finish") return summarizeStepFinish(part);
+  if (type.includes("permission")) return { text: "Permission requested", detail: input.target || input.path || input.type || "" };
+  if (!tool && !(type.includes("tool") || partType.includes("tool"))) return "";
+
+  const normalizedTool = tool || "tool";
+  const base = { text: describeToolStart(normalizedTool, status), detail: formatToolParameters(input, metadata) };
+
+  if (["write", "create", "multiedit"].includes(normalizedTool)) {
+    const filePath = input.filePath || input.path || metadata.filepath || metadata.path || "";
+    const content = typeof input.content === "string" ? input.content : "";
+    return {
+      text: `Writing ${filePath ? basename(filePath) : "file"}`,
+      detail: joinDetail([
+        filePath && `Target: ${filePath}`,
+        input.mode && `Mode: ${input.mode}`,
+        content && `Preview:\n${content.slice(0, 220)}${content.length > 220 ? "..." : ""}`,
+        output && `Result:\n${formatOutputPreview(output, 6)}`
+      ]),
+      code: content || undefined,
+      codeLang: content ? extToLang(filePath) : undefined
+    };
+  }
+
+  if (normalizedTool === "edit") {
+    const filePath = input.filePath || input.path || metadata.filepath || metadata.path || "";
+    const oldStr = input.oldString || input.old_string || input.find || "";
+    const newStr = input.newString || input.new_string || input.replace || "";
+    return {
+      text: `Editing ${filePath ? basename(filePath) : "file"}`,
+      detail: joinDetail([
+        filePath && `Target: ${filePath}`,
+        oldStr && `Replacing ${String(oldStr).split("\n").length} line(s)`,
+        newStr && `With ${String(newStr).split("\n").length} line(s)`,
+        output && `Result:\n${formatOutputPreview(output, 6)}`
+      ]),
+      oldCode: oldStr ? String(oldStr) : undefined,
+      newCode: newStr ? String(newStr) : undefined,
+      editFilePath: filePath || undefined
+    };
+  }
+
+  if (normalizedTool === "apply_patch" || normalizedTool === "patch") {
+    const patch = String(input.patchText || input.patch || input.content || "");
+    const files = extractPatchFiles(patch);
+    return {
+      text: `Applying patch${files.length ? ` to ${files.length} file(s)` : ""}`,
+      detail: joinDetail([
+        files.length && `Files:\n${files.map((file) => `- ${file}`).join("\n")}`,
+        output && `Result:\n${formatOutputPreview(output, 6)}`
+      ]),
+      code: patch || undefined,
+      codeLang: patch ? "diff" : undefined
+    };
+  }
+
+  if (normalizedTool === "read") {
+    const filePath = input.filePath || input.path || input.file || "";
+    const renderedOutput = output ? stringifyToolValue(output) : "";
+    return {
+      text: `Reading ${filePath ? basename(filePath) : "file"}`,
+      detail: joinDetail([
+        filePath && `Path: ${filePath}`,
+        input.offset !== undefined && `Offset: ${input.offset}`,
+        input.limit !== undefined && `Limit: ${input.limit}`,
+        input.start !== undefined && `Start: ${input.start}`,
+        input.end !== undefined && `End: ${input.end}`,
+        renderedOutput && `Preview:\n${formatOutputPreview(renderedOutput, 8)}`
+      ]),
+      code: renderedOutput || undefined,
+      codeLang: renderedOutput ? extToLang(filePath) : undefined
+    };
+  }
+
+  if (["bash", "command", "shell"].includes(normalizedTool)) {
+    const cmd = input.command || input.cmd || "";
+    return {
+      text: "Running command",
+      detail: joinDetail([
+        cmd && `Command:\n${cmd}`,
+        input.cwd && `Working directory: ${input.cwd}`,
+        input.timeout && `Timeout: ${input.timeout}`,
+        output && `Output preview:\n${formatOutputPreview(output, 8)}`
+      ]),
+      code: cmd ? String(cmd) : undefined,
+      codeLang: cmd ? "bash" : undefined
+    };
+  }
+
+  if (["search", "grep", "find", "glob"].includes(normalizedTool)) {
+    const query = input.query || input.pattern || input.keyword || input.glob || "";
+    return {
+      text: normalizedTool === "glob" ? "Finding files" : "Searching project",
+      detail: joinDetail([
+        query && `Query: ${query}`,
+        input.path && `Path: ${input.path}`,
+        input.include && `Include: ${input.include}`,
+        input.exclude && `Exclude: ${input.exclude}`,
+        output && `Matches:\n${formatOutputPreview(output, 10)}`
+      ]),
+      code: output ? stringifyToolValue(output) : undefined,
+      codeLang: output ? "text" : undefined
+    };
+  }
+
+  if (["todowrite", "todo", "task"].includes(normalizedTool)) {
+    const todos = input.todos || input.tasks || output.todos || output.tasks || [];
+    return {
+      text: "Updating task list",
+      detail: Array.isArray(todos)
+        ? todos.map((todo: any, index: number) => `${index + 1}. [${todo.status || todo.state || "todo"}] ${todo.content || todo.text || todo.title || JSON.stringify(todo)}`).join("\n")
+        : formatToolParameters(input, metadata)
+    };
+  }
+
+  if (normalizedTool === "webfetch" || normalizedTool === "web_fetch") {
+    return { text: "Fetching web page", detail: joinDetail([input.url && `URL: ${input.url}`, input.prompt && `Prompt: ${input.prompt}`, output && `Result:\n${formatOutputPreview(output, 8)}`]) };
+  }
+
+  if (normalizedTool === "websearch" || normalizedTool === "web_search") {
+    return { text: "Searching web", detail: joinDetail([input.query && `Query: ${input.query}`, output && `Results:\n${formatOutputPreview(output, 8)}`]) };
+  }
+
+  if (normalizedTool === "question") {
+    return { text: "Asking a question", detail: joinDetail([input.header && `Header: ${input.header}`, input.question && `Question: ${input.question}`, input.options && `Options:\n${formatOutputPreview(input.options, 8)}`]) };
+  }
+
+  if (normalizedTool === "lsp") {
+    return { text: "Using language server", detail: joinDetail([input.operation && `Operation: ${input.operation}`, input.path && `Path: ${input.path}`, input.position && `Position: ${stringifyToolValue(input.position)}`]) };
+  }
+
+  if (normalizedTool === "skill") {
+    return { text: "Loading skill", detail: joinDetail([input.name && `Skill: ${input.name}`, input.path && `Path: ${input.path}`, output && `Loaded:\n${formatOutputPreview(output, 6)}`]) };
+  }
+
+  return { text: base.text || `Using ${normalizedTool}`, detail: joinDetail([base.detail, output && `Result:\n${formatOutputPreview(output, 8)}`]) };
+}
+
 function summarizeActivityEvent(event: any): { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string } | "" {
+  const summary = summarizeMimoToolEvent(event);
+  if (summary) return summary;
+  return summarizeActivityEventLegacy(event);
+}
+
+function summarizeActivityEventLegacy(event: any): { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string } | "" {
   if (!event || typeof event !== "object") return "";
   const type = String(event.type || event.event || event.name || "").toLowerCase();
   const part = event.part || {};
@@ -967,6 +1263,120 @@ function summarizeStderrActivity(text: string): string {
   if (!clean) return "";
   const firstLine = clean.split(/\r?\n/).find(Boolean) || clean;
   return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
+}
+
+function normalizeToolName(value: unknown) {
+  return String(value || "")
+    .trim()
+    .replace(/^mcp__[^_]+__/, "")
+    .replace(/^functions\./, "")
+    .replace(/[-\s]+/g, "_")
+    .toLowerCase();
+}
+
+function normalizeToolPayload(value: any): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : { value };
+    } catch {
+      return { value };
+    }
+  }
+  if (typeof value === "object") return value;
+  return { value };
+}
+
+function stringifyToolValue(value: any) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function joinDetail(parts: any[]) {
+  return parts.filter(Boolean).map((part) => String(part).trim()).filter(Boolean).join("\n");
+}
+
+function formatOutputPreview(value: any, maxLines = 8) {
+  const text = stringifyToolValue(value);
+  const lines = text.split(/\r?\n/);
+  const preview = lines.slice(0, maxLines).join("\n");
+  return `${preview}${lines.length > maxLines ? `\n... (${lines.length - maxLines} more lines)` : ""}`;
+}
+
+function formatToolParameters(input: Record<string, any>, metadata: Record<string, any>) {
+  const important = ["filePath", "path", "command", "query", "pattern", "url", "prompt", "cwd", "mode", "operation", "target", "type"];
+  const lines: string[] = [];
+  for (const key of important) {
+    const value = input[key] ?? metadata[key];
+    if (value !== undefined && value !== "") lines.push(`${key}: ${stringifyToolValue(value)}`);
+  }
+  return lines.join("\n");
+}
+
+function describeToolStart(tool: string, status: unknown) {
+  const suffix = typeof status === "string" && status ? ` (${status})` : "";
+  const labels: Record<string, string> = {
+    read: "Reading file",
+    write: "Writing file",
+    create: "Creating file",
+    edit: "Editing file",
+    multiedit: "Editing multiple blocks",
+    apply_patch: "Applying patch",
+    bash: "Running command",
+    shell: "Running shell",
+    command: "Running command",
+    grep: "Searching project",
+    glob: "Finding files",
+    find: "Finding files",
+    webfetch: "Fetching web page",
+    websearch: "Searching web",
+    todowrite: "Updating task list",
+    question: "Asking question",
+    lsp: "Using language server",
+    skill: "Loading skill"
+  };
+  return `${labels[tool] || `Using ${tool}`}${suffix}`;
+}
+
+function extToLang(filePath: string) {
+  const ext = (filePath.split(".").pop() || "").toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+    vue: "html", py: "python", php: "php", css: "css", scss: "css",
+    json: "json", md: "markdown", html: "html", sh: "bash", bash: "bash",
+    rs: "rust", go: "go", java: "java", rb: "ruby", c: "c", cpp: "cpp", h: "c"
+  };
+  return map[ext] || ext || "text";
+}
+
+function extractPatchFiles(patch: string) {
+  const files = new Set<string>();
+  for (const line of patch.split(/\r?\n/)) {
+    const match = line.match(/^(?:\*\*\* (?:Update|Add|Delete) File:|--- a\/|\+\+\+ b\/)\s*(.+)$/);
+    if (match?.[1]) files.add(match[1].trim());
+  }
+  return Array.from(files);
+}
+
+function summarizeStepFinish(part: any) {
+  const reason = part.reason || "";
+  const tokens = part.tokens;
+  let detail = reason;
+  if (tokens) {
+    const parts = [];
+    if (tokens.input) parts.push(`${tokens.input} input`);
+    if (tokens.output) parts.push(`${tokens.output} output`);
+    if (tokens.reasoning) parts.push(`${tokens.reasoning} reasoning`);
+    if (parts.length) detail = parts.join(" · ");
+  }
+  if (reason === "tool-calls") return { text: "Processing tool results", detail };
+  return { text: "Step complete", detail };
 }
 
 function isCompletionEvent(event: any): boolean {
