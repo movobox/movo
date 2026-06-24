@@ -1368,7 +1368,7 @@ function createFileActivityWatcher(cwd: string) {
   if (!cwd || !existsSync(cwd)) return undefined;
   let watcher: FSWatcher | undefined;
   const seen = new Map<string, number>();
-  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|(?:\.mimocode|\.movo)[\\/]cache)([\\/]|$)/i;
+  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|\.mimocode|\.movo)([\\/]|$)/i;
 
   try {
     watcher = watch(cwd, { recursive: true }, (eventType, filename) => {
@@ -1381,16 +1381,12 @@ function createFileActivityWatcher(cwd: string) {
       const last = seen.get(rel) || 0;
       if (nowTs - last < 1500) return;
       seen.set(rel, nowTs);
-      const isProjectConfig = /(^|[\\/])(?:\.mimocode|\.movo)([\\/]|$)/i.test(rel);
-      const action = isProjectConfig
-        ? (eventType === "rename" ? "Creating project config file" : "Writing project config file")
-        : (eventType === "rename" ? "Creating or moving file" : "Writing file");
+      const action = eventType === "rename" ? "Creating or moving file" : "Writing file";
       mainWindow?.webContents.send("mimo:output", {
         type: "activity",
         text: `${action}: ${base}`,
         detail: [
           `Path: ${rel}`,
-          isProjectConfig ? "This is a Movo project configuration file passed to the MiMo Code engine." : "",
           "Detected from project file changes while Movo is running"
         ].filter(Boolean).join("\n")
       });

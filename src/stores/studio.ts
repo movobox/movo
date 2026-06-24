@@ -310,6 +310,9 @@ export const useStudioStore = defineStore("studio", () => {
         `Request:\n${text}`,
         allExtraFiles.length ? `Context files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
       ].filter(Boolean).join("\n")
+    }, {
+      text: "Preparing workspace",
+      detail: "Loading project settings, hidden Movo defaults, and relevant context before the engine starts."
     }];
     pendingPermissions.value = [];
     isRunning.value = true;
