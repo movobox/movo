@@ -210,9 +210,29 @@ function restorePinooxMcpDefaults() {
                 <span>MCP</span>
                 <textarea v-model="studio.appSettings.mcpServersJson" rows="6" spellcheck="false" />
               </label>
+              <label class="field">
+                <span>Agents</span>
+                <textarea v-model="studio.appSettings.agentsJson" rows="6" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>Commands</span>
+                <textarea v-model="studio.appSettings.commandsJson" rows="8" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>Tool config</span>
+                <textarea v-model="studio.appSettings.toolJson" rows="4" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>LSP</span>
+                <textarea v-model="studio.appSettings.lspJson" rows="4" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span>Formatter</span>
+                <textarea v-model="studio.appSettings.formatterJson" rows="4" spellcheck="false" />
+              </label>
               <div class="support-card">
                 <strong>Pinoox MCP</strong>
-                <span>Enabled by default via <code>npx -y pinoox-mcp</code>. Project configs automatically set <code>PINOOX_ROOT</code> and <code>PINX_ROOT</code> to the opened folder.</span>
+                <span>Enabled by default via <code>npx -y pinoox-mcp</code>. Movo also adds general Context7/Grep MCP defaults for docs and code examples.</span>
                 <button type="button" class="secondary-btn" @click="restorePinooxMcpDefaults">Restore Pinoox MCP</button>
               </div>
               <label class="field">

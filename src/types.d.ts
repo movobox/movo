@@ -47,6 +47,11 @@ export type AppSettings = {
   autoupdate: boolean | "notify";
   experimental: { maxMode: boolean };
   mcpServersJson: string;
+  agentsJson: string;
+  commandsJson: string;
+  toolJson: string;
+  lspJson: string;
+  formatterJson: string;
   keybindingsJson: string;
   serverJson: string;
   instructionsJson: string;
