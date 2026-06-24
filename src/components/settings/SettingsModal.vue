@@ -203,8 +203,8 @@ function restorePinooxMcpDefaults() {
             <section v-else class="settings-section">
               <label class="field">
                 <span>Project config directory</span>
-                <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".mimocode" spellcheck="false" />
-                <small>Default is <code>.mimocode</code>. Use <code>.movo</code> only if you want Movo to pass it to MiMo Code with <code>MIMOCODE_CONFIG_DIR</code>.</small>
+                <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".movo" spellcheck="false" />
+                <small>Default is <code>.movo</code>. Movo passes this path to the MiMo Code engine with <code>MIMOCODE_CONFIG_DIR</code>, so no new <code>.mimocode</code> folder is needed.</small>
               </label>
               <label class="field">
                 <span>MCP</span>

@@ -83,6 +83,10 @@ const defaultCommands = {
 };
 
 const defaultInstructions = [
+  ".movo/rules/*.md",
+  ".movo/rules/*.mdc",
+  ".movo/rulls/*.md",
+  ".movo/rulls/*.mdc",
   ".cursor/rules/*.md",
   ".cursor/rules/*.mdc",
   ".cursorrules",
@@ -107,7 +111,7 @@ export const defaultSettings: AppSettings = {
   trustWorkspace: true,
   skipPermissions: false,
   theme: "dark",
-  projectConfigDir: ".mimocode",
+  projectConfigDir: ".movo",
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true },
   memory: { enabled: true },
@@ -148,7 +152,7 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
     serverJson: value.serverJson || defaultSettings.serverJson,
     instructionsJson: withDefaultInstructions(value.instructionsJson || defaultSettings.instructionsJson),
     providerJson: value.providerJson || defaultSettings.providerJson,
-    projectConfigDir: value.projectConfigDir?.trim() || defaultSettings.projectConfigDir
+    projectConfigDir: normalizeProjectConfigDir(value.projectConfigDir)
   };
 }
 
@@ -178,4 +182,10 @@ function withDefaultInstructions(raw: string): string {
   } catch {
     return raw || defaultSettings.instructionsJson;
   }
+}
+
+function normalizeProjectConfigDir(value?: string): string {
+  const current = value?.trim();
+  if (!current || current === ".mimocode") return defaultSettings.projectConfigDir;
+  return current;
 }

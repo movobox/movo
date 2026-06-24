@@ -135,6 +135,10 @@ const defaultCommands = {
 };
 
 const defaultInstructions = [
+  ".movo/rules/*.md",
+  ".movo/rules/*.mdc",
+  ".movo/rulls/*.md",
+  ".movo/rulls/*.mdc",
   ".cursor/rules/*.md",
   ".cursor/rules/*.mdc",
   ".cursorrules",
@@ -146,11 +150,13 @@ const defaultInstructions = [
 const defaultToolConfig = { invocation_style: "json" };
 const defaultLspConfig = {};
 const defaultFormatterConfig = {};
+const MIMO_NATIVE_CONFIG_DIR = ".mimocode";
+const MOVO_PROJECT_CONFIG_DIR = ".movo";
 
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
   trustWorkspace: true, skipPermissions: false, theme: "dark",
-  projectConfigDir: ".mimocode",
+  projectConfigDir: MOVO_PROJECT_CONFIG_DIR,
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true }, memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 }, watcher: { enabled: true },
@@ -216,7 +222,7 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.serverJson = value.serverJson || defaultAppSettings.serverJson;
   settings.instructionsJson = withDefaultInstructions(value.instructionsJson || defaultAppSettings.instructionsJson);
   settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
-  settings.projectConfigDir = value.projectConfigDir?.trim() || defaultAppSettings.projectConfigDir;
+  settings.projectConfigDir = normalizeProjectConfigDir(value.projectConfigDir);
   return settings;
 }
 
@@ -246,6 +252,12 @@ function withDefaultInstructions(raw: string) {
   } catch {
     return raw || defaultAppSettings.instructionsJson;
   }
+}
+
+function normalizeProjectConfigDir(value?: string) {
+  const current = value?.trim();
+  if (!current || current === MIMO_NATIVE_CONFIG_DIR) return defaultAppSettings.projectConfigDir;
+  return current;
 }
 
 function appIconPath() {
@@ -464,7 +476,7 @@ ipcMain.handle("chat:import", async () => {
 });
 
 ipcMain.handle("config:read", (_event, folder: string) => {
-  const file = projectConfigPath(folder);
+  const file = existingProjectConfigPath(folder);
   if (!file || !existsSync(file)) return { ok: true, config: {}, raw: "" };
   try { return { ok: true, config: JSON.parse(readFileSync(file, "utf8")), raw: readFileSync(file, "utf8") }; }
   catch { return { ok: false, config: {}, raw: "" }; }
@@ -654,6 +666,14 @@ function projectConfigPath(folder: string) {
   return join(projectConfigDirPath(folder, defaultAppSettings), "mimocode.json");
 }
 
+function existingProjectConfigPath(folder: string) {
+  const preferred = projectConfigPath(folder);
+  if (preferred && existsSync(preferred)) return preferred;
+  const legacy = join(resolve(folder), MIMO_NATIVE_CONFIG_DIR, "mimocode.json");
+  if (existsSync(legacy)) return legacy;
+  return preferred;
+}
+
 function projectConfigPathForSettings(folder: string, appSettings: AppSettings) {
   if (!folder) return "";
   return join(projectConfigDirPath(folder, appSettings), "mimocode.json");
@@ -670,7 +690,7 @@ function projectConfigDirPath(folder: string, appSettings: AppSettings) {
 
 function shouldOverrideMimoConfigDir(appSettings: AppSettings) {
   const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim();
-  return raw && raw !== defaultAppSettings.projectConfigDir;
+  return Boolean(raw && raw !== MIMO_NATIVE_CONFIG_DIR);
 }
 
 function safeFileName(value: string) {
@@ -1172,7 +1192,7 @@ function createFileActivityWatcher(cwd: string) {
   if (!cwd || !existsSync(cwd)) return undefined;
   let watcher: FSWatcher | undefined;
   const seen = new Map<string, number>();
-  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|\.mimocode[\\/]cache)([\\/]|$)/i;
+  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|(?:\.mimocode|\.movo)[\\/]cache)([\\/]|$)/i;
 
   try {
     watcher = watch(cwd, { recursive: true }, (eventType, filename) => {
@@ -1194,7 +1214,7 @@ function createFileActivityWatcher(cwd: string) {
         text: `${action}: ${base}`,
         detail: [
           `Path: ${rel}`,
-          isProjectConfig ? "This is a MiMo Code project configuration file used by Movo." : "",
+          isProjectConfig ? "This is a Movo project configuration file passed to the MiMo Code engine." : "",
           "Detected from project file changes while Movo is running"
         ].filter(Boolean).join("\n")
       });
