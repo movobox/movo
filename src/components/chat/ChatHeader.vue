@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Activity, Square, TerminalSquare, Wifi, WifiOff } from "@lucide/vue";
+import { Activity, FolderOpen, Square, TerminalSquare, Wifi, WifiOff } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 
@@ -20,6 +20,15 @@ const { t } = useI18n();
       </div>
       <span v-if="studio.chatSizeInfo" class="chat-size">{{ studio.chatSizeInfo }}</span>
       <span v-if="studio.messageQueue.length > 0" class="queue-badge">{{ studio.messageQueue.length }}</span>
+      <button
+        class="term-toggle"
+        type="button"
+        :title="t('openProjectFolder')"
+        :disabled="!studio.projectRoot"
+        @click="studio.openProjectFolder"
+      >
+        <FolderOpen :size="17" />
+      </button>
       <div class="conn-status" :class="{ ok: !studio.isDisconnected }" :title="studio.isDisconnected ? t('disconnected') : t('connected')">
         <WifiOff v-if="studio.isDisconnected" :size="14" />
         <Wifi v-else :size="14" />

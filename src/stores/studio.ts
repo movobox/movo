@@ -787,6 +787,12 @@ export const useStudioStore = defineStore("studio", () => {
     void navigator.clipboard.writeText(text);
   }
 
+  async function openProjectFolder() {
+    const folder = projectRoot.value;
+    if (!folder) return;
+    await window.studio.openPath(folder);
+  }
+
   async function exportCurrentChat() {
     const chat = activeChat.value;
     if (!chat) return;
@@ -978,6 +984,7 @@ export const useStudioStore = defineStore("studio", () => {
     runningTerminals,
     hasRunningTerminal,
     isAgentCommandActive,
+    projectRoot,
     activeDraft,
     draftDir,
     messageQueue,
@@ -1020,6 +1027,7 @@ export const useStudioStore = defineStore("studio", () => {
     saveEditChat,
     revertTo,
     copyMessage,
+    openProjectFolder,
     exportCurrentChat,
     importSession,
     forkCurrentChat,

@@ -62,6 +62,7 @@ export default {
   workingOnIt: "Working on it...",
   writingFinal: "Writing final response...",
   openTerminal: "Open terminal",
+  openProjectFolder: "Open project folder",
   openExternalTerminal: "Open in system terminal",
   stopResponse: "Stop response",
   stoppingResponse: "Stopping...",

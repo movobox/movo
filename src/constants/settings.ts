@@ -138,6 +138,12 @@ const defaultCommands = {
     subtask: true,
     template: "Use context7 MCP for Laravel documentation. Focus on the Laravel version and packages used in this project when detectable. Task: $ARGUMENTS"
   },
+  pinoox: {
+    description: "Use Pinoox docs and MCP tooling",
+    agent: "framework",
+    subtask: true,
+    template: "Use the pinoox MCP server and official Pinoox docs for framework-specific guidance. Inspect project routes, config, models, migrations, and logs when useful. Task: $ARGUMENTS"
+  },
   vue: {
     description: "Use Vue docs through Context7 MCP",
     agent: "framework",

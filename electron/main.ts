@@ -191,6 +191,12 @@ const defaultCommands = {
     subtask: true,
     template: "Use context7 MCP for Laravel documentation. Focus on the Laravel version and packages used in this project when detectable. Task: $ARGUMENTS"
   },
+  pinoox: {
+    description: "Use Pinoox docs and MCP tooling",
+    agent: "framework",
+    subtask: true,
+    template: "Use the pinoox MCP server and official Pinoox docs for framework-specific guidance. Inspect project routes, config, models, migrations, and logs when useful. Task: $ARGUMENTS"
+  },
   vue: {
     description: "Use Vue docs through Context7 MCP",
     agent: "framework",
@@ -354,6 +360,8 @@ const defaultLspConfig = {};
 const defaultFormatterConfig = {};
 const MIMO_NATIVE_CONFIG_DIR = ".mimocode";
 const MOVO_PROJECT_CONFIG_DIR = ".movo";
+const MOVO_CONFIG_FILE = "movo.json";
+const MIMO_CONFIG_FILE = "mimocode.json";
 
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
@@ -932,20 +940,22 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 
 function projectConfigPath(folder: string) {
   if (!folder) return "";
-  return join(projectConfigDirPath(folder, defaultAppSettings), "mimocode.json");
+  return join(projectConfigDirPath(folder, defaultAppSettings), MOVO_CONFIG_FILE);
 }
 
 function existingProjectConfigPath(folder: string) {
   const preferred = projectConfigPath(folder);
   if (preferred && existsSync(preferred)) return preferred;
-  const legacy = join(resolve(folder), MIMO_NATIVE_CONFIG_DIR, "mimocode.json");
-  if (existsSync(legacy)) return legacy;
+  const legacyMovo = join(projectConfigDirPath(folder, defaultAppSettings), MIMO_CONFIG_FILE);
+  if (existsSync(legacyMovo)) return legacyMovo;
+  const legacyMimo = join(resolve(folder), MIMO_NATIVE_CONFIG_DIR, MIMO_CONFIG_FILE);
+  if (existsSync(legacyMimo)) return legacyMimo;
   return preferred;
 }
 
 function projectConfigPathForSettings(folder: string, appSettings: AppSettings) {
   if (!folder) return "";
-  return join(projectConfigDirPath(folder, appSettings), "mimocode.json");
+  return join(projectConfigDirPath(folder, appSettings), MOVO_CONFIG_FILE);
 }
 
 function projectConfigDirPath(folder: string, appSettings: AppSettings) {
@@ -972,6 +982,7 @@ function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): 
   };
   if (shouldOverrideMimoConfigDir(appSettings)) {
     env.MIMOCODE_CONFIG_DIR = projectConfigDirPath(projectFolder, appSettings);
+    env.MIMOCODE_CONFIG = projectConfigPathForSettings(projectFolder, appSettings);
   }
   return env;
 }
@@ -1275,6 +1286,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     }
     if (envExtra.MIMOCODE_HOME) mkdirSync(envExtra.MIMOCODE_HOME, { recursive: true });
     if (envExtra.MIMOCODE_CONFIG_DIR) mkdirSync(envExtra.MIMOCODE_CONFIG_DIR, { recursive: true });
+    if (envExtra.MIMOCODE_CONFIG) mkdirSync(dirname(envExtra.MIMOCODE_CONFIG), { recursive: true });
     const child = spawn(binary, args, {
       cwd,
       windowsHide: true,

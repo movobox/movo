@@ -204,7 +204,7 @@ function restorePinooxMcpDefaults() {
               <label class="field">
                 <span>Project config directory</span>
                 <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".movo" spellcheck="false" />
-                <small>Default is <code>.movo</code>. Movo passes this path to the MiMo Code engine with <code>MIMOCODE_CONFIG_DIR</code>, so no new <code>.mimocode</code> folder is needed.</small>
+                <small>Default is <code>.movo</code>. Movo writes <code>movo.json</code> there and passes it to the MiMo Code engine with <code>MIMOCODE_CONFIG</code>.</small>
               </label>
               <label class="field">
                 <span>MCP overrides</span>
