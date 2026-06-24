@@ -225,16 +225,16 @@ export const defaultSettings: AppSettings = {
   share: "manual",
   autoupdate: true,
   experimental: { maxMode: false },
-  mcpServersJson: JSON.stringify(defaultPinooxMcpServers, null, 2),
-  agentsJson: JSON.stringify(defaultAgents, null, 2),
-  commandsJson: JSON.stringify(defaultCommands, null, 2),
-  skillsJson: JSON.stringify(defaultSkills, null, 2),
-  toolJson: JSON.stringify(defaultToolConfig, null, 2),
-  lspJson: JSON.stringify(defaultLspConfig, null, 2),
-  formatterJson: JSON.stringify(defaultFormatterConfig, null, 2),
+  mcpServersJson: "{}",
+  agentsJson: "{}",
+  commandsJson: "{}",
+  skillsJson: "{}",
+  toolJson: "{}",
+  lspJson: "{}",
+  formatterJson: "{}",
   keybindingsJson: "{}",
   serverJson: "{}",
-  instructionsJson: JSON.stringify(defaultInstructions, null, 2),
+  instructionsJson: "[]",
   providerJson: "{}"
 };
 
@@ -248,16 +248,16 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
     compaction: { ...defaultSettings.compaction, ...(value.compaction || {}) },
     watcher: { ...defaultSettings.watcher, ...(value.watcher || {}) },
     experimental: { ...defaultSettings.experimental, ...(value.experimental || {}) },
-    mcpServersJson: withDefaultMcp(value.mcpServersJson || defaultSettings.mcpServersJson),
-    agentsJson: withDefaultObject(value.agentsJson || defaultSettings.agentsJson, defaultAgents),
-    commandsJson: withDefaultObject(value.commandsJson || defaultSettings.commandsJson, defaultCommands),
-    skillsJson: withDefaultSkills(value.skillsJson || defaultSettings.skillsJson),
-    toolJson: withDefaultObject(value.toolJson || defaultSettings.toolJson, defaultToolConfig),
-    lspJson: withDefaultObject(value.lspJson || defaultSettings.lspJson, defaultLspConfig),
-    formatterJson: withDefaultObject(value.formatterJson || defaultSettings.formatterJson, defaultFormatterConfig),
+    mcpServersJson: withoutDefaultObject(value.mcpServersJson || defaultSettings.mcpServersJson, defaultPinooxMcpServers),
+    agentsJson: withoutDefaultObject(value.agentsJson || defaultSettings.agentsJson, defaultAgents),
+    commandsJson: withoutDefaultObject(value.commandsJson || defaultSettings.commandsJson, defaultCommands),
+    skillsJson: withoutDefaultSkills(value.skillsJson || defaultSettings.skillsJson),
+    toolJson: withoutDefaultObject(value.toolJson || defaultSettings.toolJson, defaultToolConfig),
+    lspJson: withoutDefaultObject(value.lspJson || defaultSettings.lspJson, defaultLspConfig),
+    formatterJson: withoutDefaultObject(value.formatterJson || defaultSettings.formatterJson, defaultFormatterConfig),
     keybindingsJson: value.keybindingsJson || defaultSettings.keybindingsJson,
     serverJson: value.serverJson || defaultSettings.serverJson,
-    instructionsJson: withDefaultInstructions(value.instructionsJson || defaultSettings.instructionsJson),
+    instructionsJson: withoutDefaultInstructions(value.instructionsJson || defaultSettings.instructionsJson),
     providerJson: value.providerJson || defaultSettings.providerJson,
     projectConfigDir: normalizeProjectConfigDir(value.projectConfigDir)
   };
@@ -306,6 +306,49 @@ function withDefaultInstructions(raw: string): string {
     return JSON.stringify([...new Set([...defaultInstructions, ...current])], null, 2);
   } catch {
     return raw || defaultSettings.instructionsJson;
+  }
+}
+
+function withoutDefaultObject(raw: string, defaults: Record<string, unknown>): string {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
+    const current = parsed as Record<string, unknown>;
+    const visible: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(current)) {
+      if (key in defaults && JSON.stringify(defaults[key]) === JSON.stringify(value)) continue;
+      visible[key] = value;
+    }
+    return JSON.stringify(visible, null, 2);
+  } catch {
+    return raw || "{}";
+  }
+}
+
+function withoutDefaultSkills(raw: string): string {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
+    const current = parsed as Record<string, unknown>;
+    const visible: Record<string, unknown> = { ...current };
+    const paths = Array.isArray(current.paths)
+      ? current.paths.map(String).filter((path) => !defaultSkills.paths.includes(path))
+      : [];
+    if (paths.length) visible.paths = paths;
+    else delete visible.paths;
+    return JSON.stringify(visible, null, 2);
+  } catch {
+    return raw || "{}";
+  }
+}
+
+function withoutDefaultInstructions(raw: string): string {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : [];
+    const current = Array.isArray(parsed) ? parsed.map(String) : [];
+    return JSON.stringify(current.filter((item) => !defaultInstructions.includes(item)), null, 2);
+  } catch {
+    return raw || "[]";
   }
 }
 

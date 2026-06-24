@@ -207,23 +207,24 @@ function restorePinooxMcpDefaults() {
                 <small>Default is <code>.movo</code>. Movo passes this path to the MiMo Code engine with <code>MIMOCODE_CONFIG_DIR</code>, so no new <code>.mimocode</code> folder is needed.</small>
               </label>
               <label class="field">
-                <span>MCP</span>
+                <span>MCP overrides</span>
                 <textarea v-model="studio.appSettings.mcpServersJson" rows="6" spellcheck="false" />
+                <small>Internal defaults are hidden and merged automatically. Add only custom MCP servers here.</small>
               </label>
               <label class="field">
-                <span>Agents</span>
+                <span>Agent overrides</span>
                 <textarea v-model="studio.appSettings.agentsJson" rows="6" spellcheck="false" />
               </label>
               <label class="field">
-                <span>Commands</span>
+                <span>Command overrides</span>
                 <textarea v-model="studio.appSettings.commandsJson" rows="8" spellcheck="false" />
               </label>
               <label class="field">
-                <span>Skills</span>
+                <span>Skill overrides</span>
                 <textarea v-model="studio.appSettings.skillsJson" rows="5" spellcheck="false" />
               </label>
               <label class="field">
-                <span>Tool config</span>
+                <span>Tool config overrides</span>
                 <textarea v-model="studio.appSettings.toolJson" rows="4" spellcheck="false" />
               </label>
               <label class="field">

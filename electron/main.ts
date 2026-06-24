@@ -267,12 +267,9 @@ const defaultAppSettings: AppSettings = {
   checkpoint: { enabled: true }, memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 }, watcher: { enabled: true },
   share: "manual", autoupdate: true,
-  experimental: { maxMode: false }, mcpServersJson: JSON.stringify(defaultPinooxMcpServers, null, 2),
-  agentsJson: JSON.stringify(defaultAgents, null, 2), commandsJson: JSON.stringify(defaultCommands, null, 2),
-  skillsJson: JSON.stringify(defaultSkills, null, 2),
-  toolJson: JSON.stringify(defaultToolConfig, null, 2), lspJson: JSON.stringify(defaultLspConfig, null, 2),
-  formatterJson: JSON.stringify(defaultFormatterConfig, null, 2), keybindingsJson: "{}",
-  serverJson: "{}", instructionsJson: JSON.stringify(defaultInstructions, null, 2), providerJson: "{}"
+  experimental: { maxMode: false }, mcpServersJson: "{}", agentsJson: "{}", commandsJson: "{}",
+  skillsJson: "{}", toolJson: "{}", lspJson: "{}", formatterJson: "{}", keybindingsJson: "{}",
+  serverJson: "{}", instructionsJson: "[]", providerJson: "{}"
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -319,16 +316,16 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
     watcher: { ...defaultAppSettings.watcher, ...(value.watcher || {}) },
     experimental: { ...defaultAppSettings.experimental, ...(value.experimental || {}) }
   };
-  settings.mcpServersJson = withDefaultMcp(value.mcpServersJson || defaultAppSettings.mcpServersJson);
-  settings.agentsJson = withDefaultObject(value.agentsJson || defaultAppSettings.agentsJson, defaultAgents);
-  settings.commandsJson = withDefaultObject(value.commandsJson || defaultAppSettings.commandsJson, defaultCommands);
-  settings.skillsJson = withDefaultSkills(value.skillsJson || defaultAppSettings.skillsJson);
-  settings.toolJson = withDefaultObject(value.toolJson || defaultAppSettings.toolJson, defaultToolConfig);
-  settings.lspJson = withDefaultObject(value.lspJson || defaultAppSettings.lspJson, defaultLspConfig);
-  settings.formatterJson = withDefaultObject(value.formatterJson || defaultAppSettings.formatterJson, defaultFormatterConfig);
+  settings.mcpServersJson = withoutDefaultObject(value.mcpServersJson || defaultAppSettings.mcpServersJson, defaultPinooxMcpServers);
+  settings.agentsJson = withoutDefaultObject(value.agentsJson || defaultAppSettings.agentsJson, defaultAgents);
+  settings.commandsJson = withoutDefaultObject(value.commandsJson || defaultAppSettings.commandsJson, defaultCommands);
+  settings.skillsJson = withoutDefaultSkills(value.skillsJson || defaultAppSettings.skillsJson);
+  settings.toolJson = withoutDefaultObject(value.toolJson || defaultAppSettings.toolJson, defaultToolConfig);
+  settings.lspJson = withoutDefaultObject(value.lspJson || defaultAppSettings.lspJson, defaultLspConfig);
+  settings.formatterJson = withoutDefaultObject(value.formatterJson || defaultAppSettings.formatterJson, defaultFormatterConfig);
   settings.keybindingsJson = value.keybindingsJson || defaultAppSettings.keybindingsJson;
   settings.serverJson = value.serverJson || defaultAppSettings.serverJson;
-  settings.instructionsJson = withDefaultInstructions(value.instructionsJson || defaultAppSettings.instructionsJson);
+  settings.instructionsJson = withoutDefaultInstructions(value.instructionsJson || defaultAppSettings.instructionsJson);
   settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
   settings.projectConfigDir = normalizeProjectConfigDir(value.projectConfigDir);
   return settings;
@@ -375,6 +372,49 @@ function withDefaultInstructions(raw: string) {
     return JSON.stringify([...new Set([...defaultInstructions, ...current])], null, 2);
   } catch {
     return raw || defaultAppSettings.instructionsJson;
+  }
+}
+
+function withoutDefaultObject(raw: string, defaults: Record<string, unknown>) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
+    const current = parsed as Record<string, unknown>;
+    const visible: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(current)) {
+      if (key in defaults && JSON.stringify(defaults[key]) === JSON.stringify(value)) continue;
+      visible[key] = value;
+    }
+    return JSON.stringify(visible, null, 2);
+  } catch {
+    return raw || "{}";
+  }
+}
+
+function withoutDefaultSkills(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "{}";
+    const current = parsed as Record<string, unknown>;
+    const visible: Record<string, unknown> = { ...current };
+    const paths = Array.isArray(current.paths)
+      ? current.paths.map(String).filter((path) => !defaultSkills.paths.includes(path))
+      : [];
+    if (paths.length) visible.paths = paths;
+    else delete visible.paths;
+    return JSON.stringify(visible, null, 2);
+  } catch {
+    return raw || "{}";
+  }
+}
+
+function withoutDefaultInstructions(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : [];
+    const current = Array.isArray(parsed) ? parsed.map(String) : [];
+    return JSON.stringify(current.filter((item) => !defaultInstructions.includes(item)), null, 2);
+  } catch {
+    return raw || "[]";
   }
 }
 
@@ -961,15 +1001,15 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   if (appSettings.provider) config.provider = appSettings.provider;
   if (appSettings.model) config.model = appSettings.model;
   if (appSettings.agent) config.default_agent = appSettings.agent;
-  mergeMcpConfig(config, appSettings.mcpServersJson, folder);
-  mergeJsonConfig(config, "agent", appSettings.agentsJson);
-  mergeJsonConfig(config, "command", appSettings.commandsJson);
-  mergeJsonConfig(config, "skills", appSettings.skillsJson);
-  mergeJsonConfig(config, "tool", appSettings.toolJson);
-  mergeJsonConfig(config, "lsp", appSettings.lspJson);
-  mergeJsonConfig(config, "formatter", appSettings.formatterJson);
+  mergeMcpConfig(config, withDefaultMcp(appSettings.mcpServersJson), folder);
+  mergeJsonConfig(config, "agent", withDefaultObject(appSettings.agentsJson, defaultAgents));
+  mergeJsonConfig(config, "command", withDefaultObject(appSettings.commandsJson, defaultCommands));
+  mergeJsonConfig(config, "skills", withDefaultSkills(appSettings.skillsJson));
+  mergeJsonConfig(config, "tool", withDefaultObject(appSettings.toolJson, defaultToolConfig));
+  mergeJsonConfig(config, "lsp", withDefaultObject(appSettings.lspJson, defaultLspConfig));
+  mergeJsonConfig(config, "formatter", withDefaultObject(appSettings.formatterJson, defaultFormatterConfig));
   mergeJsonConfig(config, "server", appSettings.serverJson);
-  mergeJsonConfig(config, "instructions", appSettings.instructionsJson);
+  mergeJsonConfig(config, "instructions", withDefaultInstructions(appSettings.instructionsJson));
   mergeJsonConfig(config, "provider", appSettings.providerJson);
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
 }
