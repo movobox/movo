@@ -1,7 +1,7 @@
 {
-  "name": "oxpin",
+  "name": "movo",
   "version": "0.1.0",
-  "description": "Oxpin desktop AI studio for Pinoox and MiMo Code.",
+  "description": "Movo desktop AI studio for Pinoox and MiMo Code.",
   "main": "dist-electron/main.js",
   "type": "module",
   "author": {
@@ -47,8 +47,8 @@
     "wait-on": "^9.0.3"
   },
   "build": {
-    "appId": "com.oxpin.studio",
-    "productName": "Oxpin",
+    "appId": "com.movo.studio",
+    "productName": "Movo",
     "directories": {
       "output": "release"
     },
@@ -76,7 +76,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Oxpin"
+      "shortcutName": "Movo"
     },
     "mac": {
       "target": [

@@ -32,6 +32,7 @@ export type AppSettings = {
   trustWorkspace: boolean;
   skipPermissions: boolean;
   theme: string;
+  projectConfigDir: string;
   permissions: {
     edit: string;
     bash: string;

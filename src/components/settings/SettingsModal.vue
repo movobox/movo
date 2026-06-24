@@ -66,7 +66,7 @@ function restorePinooxMcpDefaults() {
                 <span>{{ t("theme") }}</span>
                 <select v-model="studio.appSettings.theme">
                   <option value="dark">Dark</option>
-                  <option value="mimocode">Oxpin</option>
+                  <option value="mimocode">Movo</option>
                 </select>
               </label>
 
@@ -201,6 +201,11 @@ function restorePinooxMcpDefaults() {
             </section>
 
             <section v-else class="settings-section">
+              <label class="field">
+                <span>Project config directory</span>
+                <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".mimocode" spellcheck="false" />
+                <small>Default is <code>.mimocode</code>. Use <code>.movo</code> only if you want Movo to pass it to MiMo Code with <code>MIMOCODE_CONFIG_DIR</code>.</small>
+              </label>
               <label class="field">
                 <span>MCP</span>
                 <textarea v-model="studio.appSettings.mcpServersJson" rows="6" spellcheck="false" />

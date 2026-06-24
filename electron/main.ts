@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "ele
 import type { MenuItemConstructorOptions } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, watch, FSWatcher } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
 import type { IPty } from "node-pty";
@@ -16,6 +16,7 @@ type AppSettings = {
   trustWorkspace: boolean;
   skipPermissions: boolean;
   theme: string;
+  projectConfigDir: string;
   permissions: { edit: string; bash: string; webfetch: string; websearch: string };
   checkpoint: { enabled: boolean };
   memory: { enabled: boolean };
@@ -60,6 +61,7 @@ const defaultPinooxMcpServers = {
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
   trustWorkspace: true, skipPermissions: false, theme: "dark",
+  projectConfigDir: ".mimocode",
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true }, memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 }, watcher: { enabled: true },
@@ -117,6 +119,7 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.serverJson = value.serverJson || defaultAppSettings.serverJson;
   settings.instructionsJson = value.instructionsJson || defaultAppSettings.instructionsJson;
   settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
+  settings.projectConfigDir = value.projectConfigDir?.trim() || defaultAppSettings.projectConfigDir;
   return settings;
 }
 
@@ -137,7 +140,7 @@ function appIconPath() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320, height: 860, minWidth: 1040, minHeight: 700,
-    backgroundColor: "#0e0e10", title: "Oxpin",
+    backgroundColor: "#0e0e10", title: "Movo",
     icon: appIconPath(),
     webPreferences: {
       preload: join(__dirname, "preload.js"),
@@ -323,8 +326,8 @@ ipcMain.handle("project:changes", async (_event, folder: string) => {
 
 ipcMain.handle("chat:export", async (_event, chat: Chat) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
-    defaultPath: `${safeFileName(chat?.title || "oxpin-session")}.json`,
-    filters: [{ name: "Oxpin session", extensions: ["json"] }]
+    defaultPath: `${safeFileName(chat?.title || "movo-session")}.json`,
+    filters: [{ name: "Movo session", extensions: ["json"] }]
   });
   if (result.canceled || !result.filePath) return { ok: false, error: "Canceled." };
   writeFileSync(result.filePath, JSON.stringify(chat, null, 2), "utf8");
@@ -334,7 +337,7 @@ ipcMain.handle("chat:export", async (_event, chat: Chat) => {
 ipcMain.handle("chat:import", async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
     properties: ["openFile"],
-    filters: [{ name: "Oxpin session", extensions: ["json"] }]
+    filters: [{ name: "Movo session", extensions: ["json"] }]
   });
   if (result.canceled || !result.filePaths[0]) return { ok: false, error: "Canceled." };
   try {
@@ -413,7 +416,10 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
       args.push(formatFileArg(f));
     }
     console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
-    return runMimo(args, payload.chat.folder || process.cwd(), true);
+    const mimoEnv: Record<string, string> = shouldOverrideMimoConfigDir(s)
+      ? { MIMOCODE_CONFIG_DIR: projectConfigDirPath(projectFolder, s) }
+      : {};
+    return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv);
   } catch (e) {
     console.error("[main] mimo:run error:", e);
     return { ok: false, code: -1, output: String(e) };
@@ -530,11 +536,30 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 
 function projectConfigPath(folder: string) {
   if (!folder) return "";
-  return join(folder, ".mimocode", "mimocode.json");
+  return join(projectConfigDirPath(folder, defaultAppSettings), "mimocode.json");
+}
+
+function projectConfigPathForSettings(folder: string, appSettings: AppSettings) {
+  if (!folder) return "";
+  return join(projectConfigDirPath(folder, appSettings), "mimocode.json");
+}
+
+function projectConfigDirPath(folder: string, appSettings: AppSettings) {
+  const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim() || defaultAppSettings.projectConfigDir;
+  if (isAbsolute(raw)) return raw;
+  const base = resolve(folder);
+  const target = resolve(base, raw);
+  if (target === base || target.startsWith(base + sep)) return target;
+  return join(base, defaultAppSettings.projectConfigDir);
+}
+
+function shouldOverrideMimoConfigDir(appSettings: AppSettings) {
+  const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim();
+  return raw && raw !== defaultAppSettings.projectConfigDir;
 }
 
 function safeFileName(value: string) {
-  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "oxpin-session";
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "movo-session";
 }
 
 function estimateArgLength(args: string[]) {
@@ -568,7 +593,7 @@ function prepareMimoMessageArg(message: string, projectFolder: string, forceFile
 }
 
 function writeMimoPromptFile(message: string, projectFolder: string) {
-  const tempRoot = join(app.getPath("temp"), "oxpin-prompts");
+  const tempRoot = join(app.getPath("temp"), "movo-prompts");
   mkdirSync(tempRoot, { recursive: true });
   const projectName = safeFileName(basename(projectFolder || "project"));
   const file = join(tempRoot, `${projectName}-${Date.now()}.md`);
@@ -646,7 +671,7 @@ function runCommandCapture(command: string, args: string[], cwd: string, timeout
 }
 
 function writeProjectConfig(folder: string, appSettings: AppSettings) {
-  const file = projectConfigPath(folder);
+  const file = projectConfigPathForSettings(folder, appSettings);
   if (!file) return;
   mkdirSync(dirname(file), { recursive: true });
   let existing: Record<string, unknown> = {};
@@ -771,7 +796,7 @@ function findMimoBinary(): string | null {
   return null;
 }
 
-function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0): Promise<{ ok: boolean; code: number; output: string }> {
+function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0, envExtra: Record<string, string> = {}): Promise<{ ok: boolean; code: number; output: string }> {
   if (!runId) {
     runId = ++activeRunId;
     stopRequestedForRun = 0;
@@ -779,7 +804,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
-    const msg = "Oxpin engine not found. Install @mimo-ai/cli.";
+    const msg = "Movo engine not found. Install @mimo-ai/cli.";
     console.log("[mimo] ERROR:", msg);
     if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stderr", text: msg });
     return Promise.resolve({ ok: false, code: -1, output: msg });
@@ -826,7 +851,8 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     const child = spawn(binary, args, {
       cwd,
       windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...envExtra }
     });
     child.stdin.end();
     if (activeProcess) activeProcess.kill();
@@ -897,7 +923,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
           resolveInner?.({ ok: false, code: -3, output: fullText });
           return;
         }
-        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId).then((r) => {
+        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId, envExtra).then((r) => {
           resolveInner?.(r);
           return r;
         }));
@@ -929,7 +955,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       if (!settled && streamToWindow) {
         mainWindow?.webContents.send("mimo:output", {
           type: "activity",
-          text: "Still waiting for Oxpin...",
+          text: "Still waiting for Movo...",
           detail: "Keeping the connection alive on a slow network"
         });
       }
@@ -945,7 +971,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     }
     if (elapsed > STALL_TIMEOUT_MS && !expectingMoreSteps) {
       console.log("[mimo] heartbeat: stalled for too long, marking as interrupted");
-      stderrText ||= `No response from Oxpin for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes.`;
+      stderrText ||= `No response from Movo for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes.`;
       finishRun(-2, true);
     }
   }, 15000);
@@ -1038,11 +1064,18 @@ function createFileActivityWatcher(cwd: string) {
       const last = seen.get(rel) || 0;
       if (nowTs - last < 1500) return;
       seen.set(rel, nowTs);
-      const action = eventType === "rename" ? "Creating or moving file" : "Writing file";
+      const isProjectConfig = /(^|[\\/])(?:\.mimocode|\.movo)([\\/]|$)/i.test(rel);
+      const action = isProjectConfig
+        ? (eventType === "rename" ? "Creating project config file" : "Writing project config file")
+        : (eventType === "rename" ? "Creating or moving file" : "Writing file");
       mainWindow?.webContents.send("mimo:output", {
         type: "activity",
         text: `${action}: ${base}`,
-        detail: `Path: ${rel}\nDetected from project file changes while Oxpin is running`
+        detail: [
+          `Path: ${rel}`,
+          isProjectConfig ? "This is a MiMo Code project configuration file used by Movo." : "",
+          "Detected from project file changes while Movo is running"
+        ].filter(Boolean).join("\n")
       });
     });
   } catch (e) {

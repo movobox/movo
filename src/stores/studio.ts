@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, watch } from "vue";
+import pkg from "../../package.json";
 import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
 import type { AppSettings, Chat, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
@@ -7,6 +8,8 @@ import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime
 import { useLanguageStore } from "./language";
 
 type CliStatus = { installed: boolean; version: string; checked: boolean };
+const APP_NAME = "Movo";
+const APP_VERSION = pkg.version || "0.1.0";
 
 export const useStudioStore = defineStore("studio", () => {
   const language = useLanguageStore();
@@ -386,7 +389,7 @@ export const useStudioStore = defineStore("studio", () => {
       if (!chat) return true;
       const result = await window.studio.listSessions();
       chat.messages.push(makeMessage("user", text));
-      chat.messages.push(makeMessage("system", `Oxpin sessions:\n\n\`\`\`text\n${result.output.trim() || "No sessions found."}\n\`\`\``));
+      chat.messages.push(makeMessage("system", `${APP_NAME} sessions:\n\n\`\`\`text\n${result.output.trim() || "No sessions found."}\n\`\`\``));
       chat.draft = "";
       schedulePersistence();
       return true;
@@ -395,7 +398,7 @@ export const useStudioStore = defineStore("studio", () => {
       const chat = activeChat.value;
       if (!chat) return true;
       chat.messages.push(makeMessage("user", text));
-      chat.messages.push(makeMessage("system", "Context compaction requested. The next Oxpin run will use the current saved session/context."));
+      chat.messages.push(makeMessage("system", `Context compaction requested. The next ${APP_NAME} run will use the current saved session/context.`));
       chat.draft = "";
       schedulePersistence();
       return true;
@@ -432,13 +435,26 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   function buildPromptWithCommandContext(text: string) {
+    const identity = buildMovoIdentityInstruction();
     const commandBlocks = activeChat.value?.messages
       .filter((message) => message.role === "system" && message.text.startsWith("Command output entered context:"))
       .slice(-3)
       .map((message) => message.text)
       .join("\n\n") || "";
-    if (!commandBlocks) return text;
-    return `${text}\n\nRecent command context:\n${commandBlocks}`;
+    const withIdentity = `${identity}\n\n${text}`;
+    if (!commandBlocks) return withIdentity;
+    return `${withIdentity}\n\nRecent command context:\n${commandBlocks}`;
+  }
+
+  function buildMovoIdentityInstruction() {
+    return [
+      "<movo_identity>",
+      `You are ${APP_NAME}, version ${APP_VERSION}, a desktop AI studio powered by the MiMo Code engine.`,
+      `If the user asks your name, identity, product name, app name, version, or asks who/what you are, answer as ${APP_NAME}, include version ${APP_VERSION}, and mention that you use the MiMo Code engine.`,
+      "Do not identify your product identity as MiMo, MiMoCode, MimoCode, mimecode, or the underlying engine alone.",
+      "It is okay to be transparent that Movo is powered by MiMo Code; keep Movo as the app/product identity.",
+      "</movo_identity>"
+    ].join("\n");
   }
 
   async function appendProjectChanges(chat: Chat) {

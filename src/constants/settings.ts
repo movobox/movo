@@ -19,6 +19,7 @@ export const defaultSettings: AppSettings = {
   trustWorkspace: true,
   skipPermissions: false,
   theme: "dark",
+  projectConfigDir: ".mimocode",
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true },
   memory: { enabled: true },
@@ -48,7 +49,8 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
     keybindingsJson: value.keybindingsJson || defaultSettings.keybindingsJson,
     serverJson: value.serverJson || defaultSettings.serverJson,
     instructionsJson: value.instructionsJson || defaultSettings.instructionsJson,
-    providerJson: value.providerJson || defaultSettings.providerJson
+    providerJson: value.providerJson || defaultSettings.providerJson,
+    projectConfigDir: value.projectConfigDir?.trim() || defaultSettings.projectConfigDir
   };
 }
 
