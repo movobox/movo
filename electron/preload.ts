@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("studio", {
   writeTerminalInput: (payload: unknown) => ipcRenderer.invoke("terminal:input", payload),
   resizeTerminal: (payload: unknown) => ipcRenderer.invoke("terminal:resize", payload),
   stopTerminalCommand: (terminalId: string) => ipcRenderer.invoke("terminal:stop", terminalId),
+  openExternalTerminal: (payload: unknown) => ipcRenderer.invoke("terminal:openExternal", payload),
   onTerminalData: (callback: (event: { terminalId: string; data: string }) => void) => {
     const handler = (_: unknown, data: { terminalId: string; data: string }) => callback(data);
     ipcRenderer.on("terminal:data", handler);

@@ -62,6 +62,7 @@ export default {
   workingOnIt: "در حال انجام کار...",
   writingFinal: "در حال نوشتن پاسخ نهایی...",
   openTerminal: "باز کردن ترمینال",
+  openExternalTerminal: "باز کردن در ترمینال سیستم",
   stopResponse: "توقف پاسخ",
   stoppingResponse: "در حال توقف...",
   stoppedByUser: "توسط کاربر متوقف شد.",

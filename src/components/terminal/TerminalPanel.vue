@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Maximize2, PanelRightClose, PanelTopOpen, Plus, Square, Trash2, X } from "@lucide/vue";
+import { ExternalLink, Maximize2, PanelRightClose, PanelTopOpen, Plus, Square, Trash2, X } from "@lucide/vue";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
@@ -214,6 +214,9 @@ onBeforeUnmount(() => {
       <button class="term-icon-btn" type="button" :title="studio.terminalFloating ? 'Dock terminal' : 'Float terminal'" @click="toggleFloating">
         <PanelRightClose v-if="studio.terminalFloating" :size="13" />
         <PanelTopOpen v-else :size="13" />
+      </button>
+      <button class="term-icon-btn" type="button" :title="t('openExternalTerminal')" @click="studio.openExternalTerminal">
+        <ExternalLink :size="13" />
       </button>
       <button class="term-icon-btn" type="button" title="Fit" @click="fitActiveTerminal">
         <Maximize2 :size="13" />

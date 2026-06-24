@@ -161,6 +161,7 @@ export const useStudioStore = defineStore("studio", () => {
       mcpServersJson: src.mcp ? JSON.stringify(src.mcp, null, 2) : src.mcpServers ? JSON.stringify(src.mcpServers, null, 2) : appSettings.value.mcpServersJson,
       agentsJson: src.agent && typeof src.agent === "object" ? JSON.stringify(src.agent, null, 2) : appSettings.value.agentsJson,
       commandsJson: src.command && typeof src.command === "object" ? JSON.stringify(src.command, null, 2) : appSettings.value.commandsJson,
+      skillsJson: src.skills && typeof src.skills === "object" ? JSON.stringify(src.skills, null, 2) : appSettings.value.skillsJson,
       toolJson: src.tool && typeof src.tool === "object" ? JSON.stringify(src.tool, null, 2) : appSettings.value.toolJson,
       lspJson: src.lsp && typeof src.lsp === "object" ? JSON.stringify(src.lsp, null, 2) : appSettings.value.lspJson,
       formatterJson: src.formatter && typeof src.formatter === "object" ? JSON.stringify(src.formatter, null, 2) : appSettings.value.formatterJson,
@@ -640,6 +641,11 @@ export const useStudioStore = defineStore("studio", () => {
     terminal.running = false;
   }
 
+  async function openExternalTerminal() {
+    const cwd = activeTerminal.value?.cwd || projectRoot.value || "";
+    await window.studio.openExternalTerminal({ cwd });
+  }
+
   function handleTerminalExit(event: TerminalExitEvent) {
     const terminal = terminalSessions.value.find((item) => item.id === event.terminalId);
     if (!terminal) return;
@@ -985,6 +991,7 @@ export const useStudioStore = defineStore("studio", () => {
     selectTerminal,
     closeTerminal,
     stopTerminalCommand,
+    openExternalTerminal,
     startNewChat,
     selectChat,
     deleteChat,

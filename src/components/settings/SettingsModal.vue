@@ -219,6 +219,10 @@ function restorePinooxMcpDefaults() {
                 <textarea v-model="studio.appSettings.commandsJson" rows="8" spellcheck="false" />
               </label>
               <label class="field">
+                <span>Skills</span>
+                <textarea v-model="studio.appSettings.skillsJson" rows="5" spellcheck="false" />
+              </label>
+              <label class="field">
                 <span>Tool config</span>
                 <textarea v-model="studio.appSettings.toolJson" rows="4" spellcheck="false" />
               </label>

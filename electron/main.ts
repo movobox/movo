@@ -28,6 +28,7 @@ type AppSettings = {
   mcpServersJson: string;
   agentsJson: string;
   commandsJson: string;
+  skillsJson: string;
   toolJson: string;
   lspJson: string;
   formatterJson: string;
@@ -72,6 +73,12 @@ const defaultPinooxMcpServers = {
     url: "https://mcp.grep.app",
     enabled: true,
     timeout: 8000
+  },
+  sequential_thinking: {
+    type: "local",
+    command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+    enabled: false,
+    timeout: 8000
   }
 };
 
@@ -80,13 +87,43 @@ const defaultAgents = {
     description: "Review current changes for bugs, regressions, security issues, and missing verification.",
     mode: "subagent",
     temperature: 0.1,
-    tools: { write: false, edit: false, bash: false }
+    permission: { edit: "deny", bash: "deny", webfetch: "allow", websearch: "allow" }
   },
   research: {
     description: "Research unfamiliar APIs, libraries, docs, or examples before implementation.",
     mode: "subagent",
     temperature: 0.2,
-    tools: { write: false, edit: false, bash: true, webfetch: true, websearch: true }
+    permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
+  architect: {
+    description: "Plan architecture, data flow, boundaries, and migration steps before broad changes.",
+    mode: "subagent",
+    temperature: 0.2,
+    permission: { edit: "deny", bash: "deny", webfetch: "allow", websearch: "allow" }
+  },
+  debugger: {
+    description: "Trace runtime errors, logs, failing tests, and reproduction steps.",
+    mode: "subagent",
+    temperature: 0.1,
+    permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
+  tester: {
+    description: "Find relevant verification commands and test gaps for the current task.",
+    mode: "subagent",
+    temperature: 0.1,
+    permission: { edit: "deny", bash: "ask", webfetch: "deny", websearch: "deny" }
+  },
+  security: {
+    description: "Review auth, secrets, file access, command execution, and data handling risks.",
+    mode: "subagent",
+    temperature: 0.1,
+    permission: { edit: "deny", bash: "deny", webfetch: "allow", websearch: "allow" }
+  },
+  docs: {
+    description: "Draft concise documentation, changelogs, release notes, and usage notes.",
+    mode: "subagent",
+    temperature: 0.2,
+    permission: { edit: "deny", bash: "deny", webfetch: "allow", websearch: "allow" }
   }
 };
 
@@ -103,6 +140,65 @@ const defaultCommands = {
       "Recent diff:",
       "!`git diff --stat`"
     ].join("\n")
+  },
+  plan: {
+    description: "Create a focused implementation plan",
+    agent: "architect",
+    subtask: true,
+    template: "Create a practical implementation plan for: $ARGUMENTS\nInclude risks, files likely to change, and the smallest useful verification path."
+  },
+  map: {
+    description: "Map the project structure before editing",
+    agent: "architect",
+    subtask: true,
+    template: [
+      "Map the relevant architecture for this request: $ARGUMENTS",
+      "Identify entry points, data flow, important files, and likely side effects.",
+      "Use repository inspection only; do not modify files."
+    ].join("\n")
+  },
+  debug: {
+    description: "Debug an error or broken behavior",
+    agent: "debugger",
+    template: "Debug this issue: $ARGUMENTS\nFind likely causes, inspect relevant files/logs, and propose or implement the smallest reliable fix."
+  },
+  security: {
+    description: "Review security-sensitive changes",
+    agent: "security",
+    subtask: true,
+    template: "Review this area for security risks: $ARGUMENTS\nFocus on auth, secrets, path traversal, command execution, data exposure, and unsafe defaults."
+  },
+  docs: {
+    description: "Write or improve documentation",
+    agent: "docs",
+    template: "Write concise documentation for: $ARGUMENTS\nPrefer practical usage notes, setup steps, and gotchas over marketing language."
+  },
+  refactor: {
+    description: "Plan and perform a focused refactor",
+    agent: "build",
+    template: "Refactor this area without changing behavior: $ARGUMENTS\nKeep edits scoped, preserve public behavior, and verify with focused checks."
+  },
+  migrate: {
+    description: "Plan and perform a safe migration",
+    agent: "architect",
+    template: "Plan and implement this migration carefully: $ARGUMENTS\nPreserve compatibility where reasonable and include rollback notes if relevant."
+  },
+  "release-notes": {
+    description: "Draft release notes from current changes",
+    agent: "docs",
+    template: [
+      "Draft concise release notes for the current changes.",
+      "Group user-facing changes, fixes, and developer notes.",
+      "Current status:",
+      "!`git status --short`",
+      "Diff summary:",
+      "!`git diff --stat`"
+    ].join("\n")
+  },
+  "init-rules": {
+    description: "Create or improve project AI rules",
+    agent: "docs",
+    template: "Create or improve general project rules under .movo/rules for this repository. Keep them framework-aware, concise, and safe for all future AI work."
   },
   test: {
     description: "Find and run the most relevant checks",
@@ -134,6 +230,16 @@ const defaultCommands = {
   }
 };
 
+const defaultSkills = {
+  paths: [
+    ".movo/skills",
+    ".movo/skill",
+    ".codex/skills",
+    ".agents/skills",
+    ".opencode/skills"
+  ]
+};
+
 const defaultInstructions = [
   ".movo/rules/*.md",
   ".movo/rules/*.mdc",
@@ -163,6 +269,7 @@ const defaultAppSettings: AppSettings = {
   share: "manual", autoupdate: true,
   experimental: { maxMode: false }, mcpServersJson: JSON.stringify(defaultPinooxMcpServers, null, 2),
   agentsJson: JSON.stringify(defaultAgents, null, 2), commandsJson: JSON.stringify(defaultCommands, null, 2),
+  skillsJson: JSON.stringify(defaultSkills, null, 2),
   toolJson: JSON.stringify(defaultToolConfig, null, 2), lspJson: JSON.stringify(defaultLspConfig, null, 2),
   formatterJson: JSON.stringify(defaultFormatterConfig, null, 2), keybindingsJson: "{}",
   serverJson: "{}", instructionsJson: JSON.stringify(defaultInstructions, null, 2), providerJson: "{}"
@@ -215,6 +322,7 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.mcpServersJson = withDefaultMcp(value.mcpServersJson || defaultAppSettings.mcpServersJson);
   settings.agentsJson = withDefaultObject(value.agentsJson || defaultAppSettings.agentsJson, defaultAgents);
   settings.commandsJson = withDefaultObject(value.commandsJson || defaultAppSettings.commandsJson, defaultCommands);
+  settings.skillsJson = withDefaultSkills(value.skillsJson || defaultAppSettings.skillsJson);
   settings.toolJson = withDefaultObject(value.toolJson || defaultAppSettings.toolJson, defaultToolConfig);
   settings.lspJson = withDefaultObject(value.lspJson || defaultAppSettings.lspJson, defaultLspConfig);
   settings.formatterJson = withDefaultObject(value.formatterJson || defaultAppSettings.formatterJson, defaultFormatterConfig);
@@ -224,6 +332,22 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
   settings.projectConfigDir = normalizeProjectConfigDir(value.projectConfigDir);
   return settings;
+}
+
+function withDefaultSkills(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    const current = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+    const paths = Array.isArray(current.paths) ? current.paths.map(String) : [];
+    return JSON.stringify({
+      ...current,
+      paths: [...new Set([...defaultSkills.paths, ...paths])]
+    }, null, 2);
+  } catch {
+    return raw || defaultAppSettings.skillsJson;
+  }
 }
 
 function withDefaultPinooxMcp(raw: string) {
@@ -629,6 +753,17 @@ ipcMain.handle("terminal:stop", (_event, terminalId: string) => {
   return { ok: true };
 });
 
+ipcMain.handle("terminal:openExternal", (_event, payload: { cwd?: string }) => {
+  const cwd = payload?.cwd && existsSync(payload.cwd) ? payload.cwd : process.cwd();
+  try {
+    openExternalTerminal(cwd);
+    return { ok: true };
+  } catch (e) {
+    console.error("[terminal] open external failed:", e);
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("shell:openPath", async (_event, filePath: string) => {
   if (!filePath) return { ok: false };
   try {
@@ -829,6 +964,7 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   mergeMcpConfig(config, appSettings.mcpServersJson, folder);
   mergeJsonConfig(config, "agent", appSettings.agentsJson);
   mergeJsonConfig(config, "command", appSettings.commandsJson);
+  mergeJsonConfig(config, "skills", appSettings.skillsJson);
   mergeJsonConfig(config, "tool", appSettings.toolJson);
   mergeJsonConfig(config, "lsp", appSettings.lspJson);
   mergeJsonConfig(config, "formatter", appSettings.formatterJson);
@@ -1240,6 +1376,51 @@ function killProcessTree(child: ChildProcessWithoutNullStreams) {
     return;
   }
   child.kill("SIGTERM");
+}
+
+function openExternalTerminal(cwd: string) {
+  if (platform() === "win32") {
+    const script = [
+      "$cwd = $args[0]",
+      "if (Get-Command wt.exe -ErrorAction SilentlyContinue) {",
+      "  Start-Process wt.exe -ArgumentList @('-d', $cwd)",
+      "} else {",
+      "  Start-Process powershell.exe -WorkingDirectory $cwd -ArgumentList @('-NoLogo', '-NoExit')",
+      "}"
+    ].join("; ");
+    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script, cwd], {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore"
+    }).unref();
+    return;
+  }
+
+  if (platform() === "darwin") {
+    spawn("open", ["-a", "Terminal", cwd], {
+      detached: true,
+      stdio: "ignore"
+    }).unref();
+    return;
+  }
+
+  const candidates = [
+    ["x-terminal-emulator", ["--working-directory", cwd]],
+    ["gnome-terminal", ["--working-directory", cwd]],
+    ["konsole", ["--workdir", cwd]],
+    ["xfce4-terminal", ["--working-directory", cwd]],
+    ["xterm", ["-e", `cd "${cwd.replace(/"/g, '\\"')}" && ${process.env.SHELL || "bash"}`]]
+  ] as const;
+
+  for (const [command, args] of candidates) {
+    try {
+      const child = spawn(command, args, { detached: true, stdio: "ignore" });
+      child.unref();
+      return;
+    } catch {}
+  }
+
+  throw new Error("No supported external terminal was found.");
 }
 
 function extractOutputText(event: any): string {

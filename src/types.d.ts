@@ -49,6 +49,7 @@ export type AppSettings = {
   mcpServersJson: string;
   agentsJson: string;
   commandsJson: string;
+  skillsJson: string;
   toolJson: string;
   lspJson: string;
   formatterJson: string;
@@ -158,6 +159,7 @@ declare global {
       writeTerminalInput: (payload: { terminalId: string; data: string }) => Promise<{ ok: boolean }>;
       resizeTerminal: (payload: { terminalId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
       stopTerminalCommand: (terminalId: string) => Promise<{ ok: boolean }>;
+      openExternalTerminal: (payload: { cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
       onTerminalData: (callback: (event: TerminalDataEvent) => void) => () => void;
       onTerminalExit: (callback: (event: TerminalExitEvent) => void) => () => void;
       openPath: (filePath: string) => Promise<{ ok: boolean }>;
