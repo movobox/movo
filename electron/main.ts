@@ -707,9 +707,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
       args.push(formatFileArg(f));
     }
     console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
-    const mimoEnv: Record<string, string> = shouldOverrideMimoConfigDir(s)
-      ? { MIMOCODE_CONFIG_DIR: projectConfigDirPath(projectFolder, s) }
-      : {};
+    const mimoEnv = buildMimoEnvironment(projectFolder, s);
     return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv);
   } catch (e) {
     console.error("[main] mimo:run error:", e);
@@ -717,7 +715,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
   }
 });
 
-ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false));
+ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false, 0, "", 0, buildMimoEnvironment(process.cwd(), defaultAppSettings)));
 
 ipcMain.handle("mimo:stop", () => {
   stopRequestedForRun = activeRunId;
@@ -866,6 +864,20 @@ function projectConfigDirPath(folder: string, appSettings: AppSettings) {
 function shouldOverrideMimoConfigDir(appSettings: AppSettings) {
   const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim();
   return Boolean(raw && raw !== MIMO_NATIVE_CONFIG_DIR);
+}
+
+function mimoProfileRoot() {
+  return join(app.getPath("userData"), "mimocode-profile");
+}
+
+function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
+  const env: Record<string, string> = {
+    MIMOCODE_HOME: mimoProfileRoot()
+  };
+  if (shouldOverrideMimoConfigDir(appSettings)) {
+    env.MIMOCODE_CONFIG_DIR = projectConfigDirPath(projectFolder, appSettings);
+  }
+  return env;
 }
 
 function safeFileName(value: string) {
@@ -1165,6 +1177,8 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       resolve({ ok: false, code: -3, output: "" });
       return;
     }
+    if (envExtra.MIMOCODE_HOME) mkdirSync(envExtra.MIMOCODE_HOME, { recursive: true });
+    if (envExtra.MIMOCODE_CONFIG_DIR) mkdirSync(envExtra.MIMOCODE_CONFIG_DIR, { recursive: true });
     const child = spawn(binary, args, {
       cwd,
       windowsHide: true,
