@@ -71,6 +71,12 @@ const defaultAgents = {
     mode: "subagent",
     temperature: 0.2,
     permission: { edit: "deny", bash: "deny", webfetch: "allow", websearch: "allow" }
+  },
+  framework: {
+    description: "Use framework-specific documentation and current best practices before coding.",
+    mode: "subagent",
+    temperature: 0.15,
+    permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   }
 };
 
@@ -119,6 +125,96 @@ const defaultCommands = {
     description: "Write or improve documentation",
     agent: "docs",
     template: "Write concise documentation for: $ARGUMENTS\nPrefer practical usage notes, setup steps, and gotchas over marketing language."
+  },
+  framework: {
+    description: "Use Context7 MCP for any framework or library docs",
+    agent: "framework",
+    subtask: true,
+    template: "Use the context7 MCP server to fetch current, version-aware documentation for this framework/library/topic: $ARGUMENTS\nReturn the relevant APIs, conventions, pitfalls, and a concise implementation recommendation."
+  },
+  laravel: {
+    description: "Use Laravel docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Laravel documentation. Focus on the Laravel version and packages used in this project when detectable. Task: $ARGUMENTS"
+  },
+  vue: {
+    description: "Use Vue docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Vue documentation and ecosystem guidance. Include Vue Router, Pinia, Vite, or Nuxt only when relevant. Task: $ARGUMENTS"
+  },
+  react: {
+    description: "Use React docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for React documentation and ecosystem guidance. Include Next.js or React Router only when relevant. Task: $ARGUMENTS"
+  },
+  nextjs: {
+    description: "Use Next.js docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Next.js documentation. Prefer App Router guidance unless the project uses Pages Router. Task: $ARGUMENTS"
+  },
+  nuxt: {
+    description: "Use Nuxt docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Nuxt documentation. Include Vue and Nitro details only when relevant. Task: $ARGUMENTS"
+  },
+  angular: {
+    description: "Use Angular docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Angular documentation. Prefer current standalone/component-first patterns when compatible with the project. Task: $ARGUMENTS"
+  },
+  svelte: {
+    description: "Use Svelte/SvelteKit docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Svelte or SvelteKit documentation as relevant to the project. Task: $ARGUMENTS"
+  },
+  django: {
+    description: "Use Django docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Django documentation. Include Django REST Framework only when relevant. Task: $ARGUMENTS"
+  },
+  rails: {
+    description: "Use Rails docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Ruby on Rails documentation and conventions. Task: $ARGUMENTS"
+  },
+  fastapi: {
+    description: "Use FastAPI docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for FastAPI documentation. Include Pydantic and async guidance when relevant. Task: $ARGUMENTS"
+  },
+  spring: {
+    description: "Use Spring docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Spring and Spring Boot documentation. Task: $ARGUMENTS"
+  },
+  dotnet: {
+    description: "Use .NET docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for .NET, ASP.NET Core, or Entity Framework documentation as relevant. Task: $ARGUMENTS"
+  },
+  flutter: {
+    description: "Use Flutter docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Flutter and Dart documentation. Task: $ARGUMENTS"
+  },
+  electron: {
+    description: "Use Electron docs through Context7 MCP",
+    agent: "framework",
+    subtask: true,
+    template: "Use context7 MCP for Electron documentation. Include security, preload, IPC, and packaging notes when relevant. Task: $ARGUMENTS"
   },
   refactor: {
     description: "Plan and perform a focused refactor",
