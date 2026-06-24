@@ -1736,6 +1736,40 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 .toggle-row small { display: block; font-size: 11px; color: #555; margin-top: 2px; }
 
 .settings-footer { padding-top: 12px; border-top: 1px solid #1e1e22; }
+.support-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #25252b;
+  border-radius: 8px;
+  background: #101014;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.support-card strong {
+  color: #f4f4f5;
+  font-size: 13px;
+}
+.support-card code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #1a1a22;
+  color: #c4b5fd;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+}
+.secondary-btn {
+  justify-self: start;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  background: #27272a;
+  color: #d4d4d8;
+  font-size: 12px;
+  font-weight: 600;
+}
+.secondary-btn:hover { background: #34343a; color: #fff; }
 .danger-btn {
   display: flex;
   align-items: center;

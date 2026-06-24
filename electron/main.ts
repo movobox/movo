@@ -46,6 +46,17 @@ type Chat = {
 type UiState = { activeChatId: string; draftChat: Chat | null };
 type Settings = { app: AppSettings; chats: Chat[]; ui: UiState };
 
+const defaultPinooxMcpServers = {
+  pinoox: {
+    type: "local",
+    command: ["npx", "-y", "pinoox-mcp"],
+    environment: {
+      PINOOX_ROOT: "${workspaceFolder}",
+      PINX_ROOT: "${workspaceFolder}"
+    }
+  }
+};
+
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
   trustWorkspace: true, skipPermissions: false, theme: "dark",
@@ -53,7 +64,7 @@ const defaultAppSettings: AppSettings = {
   checkpoint: { enabled: true }, memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 }, watcher: { enabled: true },
   share: "manual", autoupdate: true,
-  experimental: { maxMode: false }, mcpServersJson: "{}", keybindingsJson: "{}",
+  experimental: { maxMode: false }, mcpServersJson: JSON.stringify(defaultPinooxMcpServers, null, 2), keybindingsJson: "{}",
   serverJson: "{}", instructionsJson: "[]", providerJson: "{}"
 };
 
@@ -75,7 +86,7 @@ function loadSettings(): Settings {
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
     return {
-      app: { ...defaultAppSettings, ...(parsed.app || {}) },
+      app: normalizeAppSettingsForMain(parsed.app || {}),
       chats: Array.isArray(parsed.chats) ? parsed.chats : [],
       ui: {
         activeChatId: typeof parsed.ui?.activeChatId === "string" ? parsed.ui.activeChatId : "",
@@ -90,15 +101,50 @@ function saveSettingsToDisk(settings: Settings) {
   writeFileSync(settingsPath(), JSON.stringify(settings, null, 2), "utf8");
 }
 
+function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSettings {
+  const settings = {
+    ...defaultAppSettings,
+    ...value,
+    permissions: { ...defaultAppSettings.permissions, ...(value.permissions || {}) },
+    checkpoint: { ...defaultAppSettings.checkpoint, ...(value.checkpoint || {}) },
+    memory: { ...defaultAppSettings.memory, ...(value.memory || {}) },
+    compaction: { ...defaultAppSettings.compaction, ...(value.compaction || {}) },
+    watcher: { ...defaultAppSettings.watcher, ...(value.watcher || {}) },
+    experimental: { ...defaultAppSettings.experimental, ...(value.experimental || {}) }
+  };
+  settings.mcpServersJson = withDefaultPinooxMcp(value.mcpServersJson || defaultAppSettings.mcpServersJson);
+  settings.keybindingsJson = value.keybindingsJson || defaultAppSettings.keybindingsJson;
+  settings.serverJson = value.serverJson || defaultAppSettings.serverJson;
+  settings.instructionsJson = value.instructionsJson || defaultAppSettings.instructionsJson;
+  settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
+  return settings;
+}
+
+function withDefaultPinooxMcp(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    const current = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return JSON.stringify({ ...defaultPinooxMcpServers, ...current }, null, 2);
+  } catch {
+    return raw || defaultAppSettings.mcpServersJson;
+  }
+}
+
+function appIconPath() {
+  return join(__dirname, "../build/icon.png");
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320, height: 860, minWidth: 1040, minHeight: 700,
-    backgroundColor: "#0e0e10", title: "MiMo Studio",
+    backgroundColor: "#0e0e10", title: "Oxpin",
+    icon: appIconPath(),
     webPreferences: {
       preload: join(__dirname, "preload.js"),
       contextIsolation: true, nodeIntegration: false
     }
   });
+  if (process.platform === "darwin") app.dock?.setIcon(appIconPath());
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
   } else {
@@ -163,7 +209,7 @@ ipcMain.handle("settings:get", () => loadSettings());
 
 ipcMain.handle("settings:save", (_event, appSettings: AppSettings) => {
   const settings = loadSettings();
-  settings.app = { ...defaultAppSettings, ...appSettings };
+  settings.app = normalizeAppSettingsForMain(appSettings);
   saveSettingsToDisk(settings);
   return { ok: true };
 });
@@ -277,8 +323,8 @@ ipcMain.handle("project:changes", async (_event, folder: string) => {
 
 ipcMain.handle("chat:export", async (_event, chat: Chat) => {
   const result = await dialog.showSaveDialog(mainWindow!, {
-    defaultPath: `${safeFileName(chat?.title || "mimo-session")}.json`,
-    filters: [{ name: "MiMo session", extensions: ["json"] }]
+    defaultPath: `${safeFileName(chat?.title || "oxpin-session")}.json`,
+    filters: [{ name: "Oxpin session", extensions: ["json"] }]
   });
   if (result.canceled || !result.filePath) return { ok: false, error: "Canceled." };
   writeFileSync(result.filePath, JSON.stringify(chat, null, 2), "utf8");
@@ -288,7 +334,7 @@ ipcMain.handle("chat:export", async (_event, chat: Chat) => {
 ipcMain.handle("chat:import", async () => {
   const result = await dialog.showOpenDialog(mainWindow!, {
     properties: ["openFile"],
-    filters: [{ name: "MiMo session", extensions: ["json"] }]
+    filters: [{ name: "Oxpin session", extensions: ["json"] }]
   });
   if (result.canceled || !result.filePaths[0]) return { ok: false, error: "Canceled." };
   try {
@@ -488,7 +534,7 @@ function projectConfigPath(folder: string) {
 }
 
 function safeFileName(value: string) {
-  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "mimo-session";
+  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "oxpin-session";
 }
 
 function estimateArgLength(args: string[]) {
@@ -522,7 +568,7 @@ function prepareMimoMessageArg(message: string, projectFolder: string, forceFile
 }
 
 function writeMimoPromptFile(message: string, projectFolder: string) {
-  const tempRoot = join(app.getPath("temp"), "mimo-studio-prompts");
+  const tempRoot = join(app.getPath("temp"), "oxpin-prompts");
   mkdirSync(tempRoot, { recursive: true });
   const projectName = safeFileName(basename(projectFolder || "project"));
   const file = join(tempRoot, `${projectName}-${Date.now()}.md`);
@@ -619,11 +665,75 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   if (appSettings.provider) config.provider = appSettings.provider;
   if (appSettings.model) config.model = appSettings.model;
   if (appSettings.agent) config.default_agent = appSettings.agent;
-  mergeJsonConfig(config, "mcp", appSettings.mcpServersJson);
+  mergeMcpConfig(config, appSettings.mcpServersJson, folder);
   mergeJsonConfig(config, "server", appSettings.serverJson);
   mergeJsonConfig(config, "instructions", appSettings.instructionsJson);
   mergeJsonConfig(config, "provider", appSettings.providerJson);
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
+}
+
+function mergeMcpConfig(config: Record<string, unknown>, raw: string, folder: string) {
+  const parsed = parseJsonObject(raw);
+  if (!parsed) return;
+  const servers = parsed.mcpServers && typeof parsed.mcpServers === "object" && !Array.isArray(parsed.mcpServers)
+    ? parsed.mcpServers as Record<string, unknown>
+    : parsed;
+  config.mcp = hydratePinooxMcpServers(servers, folder);
+}
+
+function parseJsonObject(raw: string) {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function hydratePinooxMcpServers(servers: Record<string, unknown>, folder: string) {
+  const next: Record<string, unknown> = { ...servers };
+  const pinoox = next.pinoox;
+  if (!pinoox || typeof pinoox !== "object" || Array.isArray(pinoox)) return next;
+  const server = pinoox as Record<string, unknown>;
+  const timeout = typeof server.timeout === "number" ? server.timeout : undefined;
+  const cwd = typeof server.cwd === "string" ? resolveWorkspacePlaceholder(server.cwd, folder) : undefined;
+  next.pinoox = {
+    type: "local",
+    command: normalizeMcpCommand(server),
+    environment: hydrateMcpEnvironment(server, folder),
+    enabled: server.enabled !== false,
+    ...(cwd ? { cwd } : {}),
+    ...(timeout ? { timeout } : {})
+  };
+  return next;
+}
+
+function normalizeMcpCommand(server: Record<string, unknown>) {
+  if (Array.isArray(server.command)) return server.command.map(String);
+  const command = typeof server.command === "string" ? server.command : "npx";
+  const args = Array.isArray(server.args) ? server.args.map(String) : ["-y", "pinoox-mcp"];
+  return [command, ...args];
+}
+
+function hydrateMcpEnvironment(server: Record<string, unknown>, folder: string) {
+  const source = server.environment || server.env;
+  const env = source && typeof source === "object" && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : {};
+  return {
+    ...env,
+    PINOOX_ROOT: resolveWorkspacePlaceholder(String(env.PINOOX_ROOT || "${workspaceFolder}"), folder),
+    PINX_ROOT: resolveWorkspacePlaceholder(String(env.PINX_ROOT || "${workspaceFolder}"), folder)
+  };
+}
+
+function resolveWorkspacePlaceholder(value: string, folder: string) {
+  if (!folder) return value;
+  return value
+    .replace(/\$\{workspaceFolder\}/g, folder)
+    .replace(/\$\{projectFolder\}/g, folder)
+    .replace(/\$\{PINOOX_ROOT\}/g, folder);
 }
 
 function mergeJsonConfig(config: Record<string, unknown>, key: string, raw: string) {
@@ -669,7 +779,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
-    const msg = "MiMo binary not found. Install @mimo-ai/cli.";
+    const msg = "Oxpin engine not found. Install @mimo-ai/cli.";
     console.log("[mimo] ERROR:", msg);
     if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stderr", text: msg });
     return Promise.resolve({ ok: false, code: -1, output: msg });
@@ -819,7 +929,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       if (!settled && streamToWindow) {
         mainWindow?.webContents.send("mimo:output", {
           type: "activity",
-          text: "Still waiting for MiMo...",
+          text: "Still waiting for Oxpin...",
           detail: "Keeping the connection alive on a slow network"
         });
       }
@@ -835,7 +945,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     }
     if (elapsed > STALL_TIMEOUT_MS && !expectingMoreSteps) {
       console.log("[mimo] heartbeat: stalled for too long, marking as interrupted");
-      stderrText ||= `No response from MiMo for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes.`;
+      stderrText ||= `No response from Oxpin for ${Math.round(STALL_TIMEOUT_MS / 60000)} minutes.`;
       finishRun(-2, true);
     }
   }, 15000);
@@ -932,7 +1042,7 @@ function createFileActivityWatcher(cwd: string) {
       mainWindow?.webContents.send("mimo:output", {
         type: "activity",
         text: `${action}: ${base}`,
-        detail: `Path: ${rel}\nDetected from project file changes while MiMo is running`
+        detail: `Path: ${rel}\nDetected from project file changes while Oxpin is running`
       });
     });
   } catch (e) {

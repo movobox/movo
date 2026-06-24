@@ -1,7 +1,7 @@
 {
-  "name": "mimo-coder-studio",
+  "name": "oxpin",
   "version": "0.1.0",
-  "description": "A simple desktop chat app for MiMo Code.",
+  "description": "Oxpin desktop AI studio for Pinoox and MiMo Code.",
   "main": "dist-electron/main.js",
   "type": "module",
   "author": {
@@ -13,6 +13,7 @@
     "build": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "build:dir": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
     "build:win": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "build:win:vs": "cmd /d /s /c \"\\\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\\\" -arch=x64 -host_arch=x64 && npm run build:win\"",
     "build:mac": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "build:linux": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "preview": "vite preview",
@@ -46,24 +47,36 @@
     "wait-on": "^9.0.3"
   },
   "build": {
-    "appId": "com.mimocoder.studio",
-    "productName": "MiMo Studio",
+    "appId": "com.oxpin.studio",
+    "productName": "Oxpin",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "build/**/*",
       "package.json"
     ],
+    "icon": "build/icon.png",
     "asarUnpack": [
       "node_modules/@mimo-ai/**"
     ],
     "win": {
+      "icon": "build/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator",
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Oxpin"
     },
     "mac": {
       "target": [

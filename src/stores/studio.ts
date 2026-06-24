@@ -386,7 +386,7 @@ export const useStudioStore = defineStore("studio", () => {
       if (!chat) return true;
       const result = await window.studio.listSessions();
       chat.messages.push(makeMessage("user", text));
-      chat.messages.push(makeMessage("system", `MiMo sessions:\n\n\`\`\`text\n${result.output.trim() || "No sessions found."}\n\`\`\``));
+      chat.messages.push(makeMessage("system", `Oxpin sessions:\n\n\`\`\`text\n${result.output.trim() || "No sessions found."}\n\`\`\``));
       chat.draft = "";
       schedulePersistence();
       return true;
@@ -395,7 +395,7 @@ export const useStudioStore = defineStore("studio", () => {
       const chat = activeChat.value;
       if (!chat) return true;
       chat.messages.push(makeMessage("user", text));
-      chat.messages.push(makeMessage("system", "Context compaction requested. The next MiMo run will use the current saved session/context."));
+      chat.messages.push(makeMessage("system", "Context compaction requested. The next Oxpin run will use the current saved session/context."));
       chat.draft = "";
       schedulePersistence();
       return true;

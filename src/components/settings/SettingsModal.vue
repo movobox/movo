@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { Bot, Code2, Globe2, KeyRound, Network, ShieldCheck, SlidersHorizontal, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+import { defaultSettings, withDefaultPinooxMcp } from "../../constants/settings";
 import { useLanguageStore } from "../../stores/language";
 import { useStudioStore } from "../../stores/studio";
 
@@ -18,6 +19,10 @@ const sections = computed(() => [
   { id: "network", label: t("settingsNetwork"), icon: Network },
   { id: "advanced", label: t("settingsAdvanced"), icon: KeyRound }
 ]);
+
+function restorePinooxMcpDefaults() {
+  studio.appSettings.mcpServersJson = withDefaultPinooxMcp(defaultSettings.mcpServersJson);
+}
 </script>
 
 <template>
@@ -61,7 +66,7 @@ const sections = computed(() => [
                 <span>{{ t("theme") }}</span>
                 <select v-model="studio.appSettings.theme">
                   <option value="dark">Dark</option>
-                  <option value="mimocode">MiMo Code</option>
+                  <option value="mimocode">Oxpin</option>
                 </select>
               </label>
 
@@ -200,6 +205,11 @@ const sections = computed(() => [
                 <span>MCP</span>
                 <textarea v-model="studio.appSettings.mcpServersJson" rows="6" spellcheck="false" />
               </label>
+              <div class="support-card">
+                <strong>Pinoox MCP</strong>
+                <span>Enabled by default via <code>npx -y pinoox-mcp</code>. Project configs automatically set <code>PINOOX_ROOT</code> and <code>PINX_ROOT</code> to the opened folder.</span>
+                <button type="button" class="secondary-btn" @click="restorePinooxMcpDefaults">Restore Pinoox MCP</button>
+              </div>
               <label class="field">
                 <span>Keybinds</span>
                 <textarea v-model="studio.appSettings.keybindingsJson" rows="6" spellcheck="false" />
