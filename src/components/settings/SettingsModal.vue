@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Bot, Code2, Globe2, KeyRound, Network, ShieldCheck, SlidersHorizontal, Trash2 } from "@lucide/vue";
+import { Bot, Code2, KeyRound, Network, ShieldCheck, SlidersHorizontal, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { defaultSettings, withDefaultPinooxMcp } from "../../constants/settings";
 import { useLanguageStore } from "../../stores/language";
@@ -22,6 +22,11 @@ const sections = computed(() => [
 
 function restorePinooxMcpDefaults() {
   studio.appSettings.mcpServersJson = withDefaultPinooxMcp(defaultSettings.mcpServersJson);
+}
+
+function setLanguageFromSelect(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === "en" || value === "fa") language.setLanguage(value);
 }
 </script>
 
@@ -52,14 +57,10 @@ function restorePinooxMcpDefaults() {
             <section v-if="activeSection === 'general'" class="settings-section">
               <label class="field">
                 <span>{{ t("language") }}</span>
-                <div class="lang-toggle">
-                  <button type="button" :class="{ active: language.locale === 'en' }" @click="language.setLanguage('en')">
-                    <Globe2 :size="14" /> EN
-                  </button>
-                  <button type="button" :class="{ active: language.locale === 'fa' }" @click="language.setLanguage('fa')">
-                    <Globe2 :size="14" /> FA
-                  </button>
-                </div>
+                <select :value="language.locale" @change="setLanguageFromSelect">
+                  <option value="en">{{ t("english") }}</option>
+                  <option value="fa">{{ t("persian") }}</option>
+                </select>
               </label>
 
               <label class="field">

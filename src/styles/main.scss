@@ -1703,24 +1703,6 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: #6366f1; }
 
-.lang-toggle { display: flex; gap: 4px; }
-.lang-toggle button {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 34px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-  background: #0e0e10;
-  border: 1px solid #27272a;
-  transition: all 0.12s;
-}
-.lang-toggle button.active { background: #fff; color: #000; border-color: #fff; }
-
 .toggles { display: grid; gap: 6px; margin-bottom: 16px; }
 .toggle-row {
   display: flex;

@@ -379,12 +379,16 @@ const defaultAppSettings: AppSettings = {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 let mainWindow: BrowserWindow | undefined;
-let activeProcess: ChildProcessWithoutNullStreams | undefined;
 let activeRunId = 0;
-let stopRequestedForRun = 0;
-let activeRetryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeRunCancel: (() => void) | undefined;
 const terminalProcesses = new Map<string, IPty>();
+const activeRuns = new Map<number, {
+  chatId: string;
+  child?: ChildProcessWithoutNullStreams;
+  retryTimer?: ReturnType<typeof setTimeout>;
+  cancel?: () => void;
+}>();
+const latestRunByChat = new Map<string, number>();
+const stopRequestedRuns = new Set<number>();
 
 function settingsPath() { return join(app.getPath("userData"), "studio-settings.json"); }
 
@@ -812,7 +816,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
     }
     console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
     const mimoEnv = buildMimoEnvironment(projectFolder, s);
-    return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv);
+    return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv, payload.chat?.id || "", payload.message || "");
   } catch (e) {
     console.error("[main] mimo:run error:", e);
     return { ok: false, code: -1, output: String(e) };
@@ -821,22 +825,28 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
 
 ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false, 0, "", 0, buildMimoEnvironment(process.cwd(), defaultAppSettings)));
 
-ipcMain.handle("mimo:stop", () => {
-  stopRequestedForRun = activeRunId;
-  if (activeRetryTimer) {
-    clearTimeout(activeRetryTimer);
-    activeRetryTimer = undefined;
+ipcMain.handle("mimo:stop", (_event, payload?: { chatId?: string }) => {
+  const runIds = payload?.chatId
+    ? [latestRunByChat.get(payload.chatId)].filter((id): id is number => typeof id === "number")
+    : Array.from(activeRuns.keys());
+  for (const runId of runIds) {
+    stopRequestedRuns.add(runId);
+    const run = activeRuns.get(runId);
+    if (run?.retryTimer) clearTimeout(run.retryTimer);
+    if (run?.child) killProcessTree(run.child);
+    run?.cancel?.();
+    activeRuns.delete(runId);
   }
-  activeProcess?.kill();
-  activeProcess = undefined;
-  activeRunCancel?.();
-  activeRunCancel = undefined;
   return { ok: true };
 });
 
-ipcMain.handle("mimo:approve-perm", (_event, permType: string) => {
-  if (activeProcess?.stdin && !activeProcess.stdin.destroyed) {
-    activeProcess.stdin.write("y\n");
+ipcMain.handle("mimo:approve-perm", (_event, payload: string | { type: string; chatId?: string }) => {
+  const permType = typeof payload === "string" ? payload : payload.type;
+  const chatId = typeof payload === "string" ? "" : payload.chatId || "";
+  const runId = chatId ? latestRunByChat.get(chatId) : Array.from(activeRuns.keys()).at(-1);
+  const child = typeof runId === "number" ? activeRuns.get(runId)?.child : undefined;
+  if (child?.stdin && !child.stdin.destroyed) {
+    child.stdin.write("y\n");
     console.log("[main] approved permission:", permType);
   }
   return { ok: true };
