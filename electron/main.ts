@@ -785,8 +785,6 @@ ipcMain.handle("mimo:check", async () => {
 ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appSettings: AppSettings; extraFiles: string[] }) => {
   try {
     console.log("[main] mimo:run called, message:", payload.message);
-    lastRunChatId = payload.chat?.id || "";
-    lastRunMessage = payload.message || "";
     const args = ["run", "--format", "json", "--dangerously-skip-permissions"];
     const s = { ...defaultAppSettings, ...payload.appSettings };
     if (s.agent) args.push("--agent", s.agent);
@@ -1242,17 +1240,18 @@ function findMimoBinary(): string | null {
   return null;
 }
 
-function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0, envExtra: Record<string, string> = {}): Promise<{ ok: boolean; code: number; output: string }> {
+function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0, envExtra: Record<string, string> = {}, chatId = "", runMessage = ""): Promise<{ ok: boolean; code: number; output: string }> {
   if (!runId) {
     runId = ++activeRunId;
-    stopRequestedForRun = 0;
+    stopRequestedRuns.delete(runId);
+    if (chatId) latestRunByChat.set(chatId, runId);
   }
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
     const msg = "Movo engine not found. Install @mimo-ai/cli.";
     console.log("[mimo] ERROR:", msg);
-    if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stderr", text: msg });
+    if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stderr", text: msg });
     return Promise.resolve({ ok: false, code: -1, output: msg });
   }
 
@@ -1289,8 +1288,11 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   }
 
   return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
-    activeRunCancel = () => resolve({ ok: false, code: -3, output: "" });
-    if (stopRequestedForRun === runId) {
+    const runContext = activeRuns.get(runId) || { chatId };
+    runContext.chatId = chatId || runContext.chatId || "";
+    runContext.cancel = () => resolve({ ok: false, code: -3, output: "" });
+    activeRuns.set(runId, runContext);
+    if (stopRequestedRuns.has(runId)) {
       resolve({ ok: false, code: -3, output: "" });
       return;
     }
@@ -1304,8 +1306,8 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       env: { ...process.env, ...envExtra }
     });
     child.stdin.end();
-    if (activeProcess) activeProcess.kill();
-    activeProcess = child;
+    runContext.child = child;
+    activeRuns.set(runId, runContext);
     let fullText = accumulatedOutput;
     let stderrText = "";
     const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd) : undefined;
@@ -1346,10 +1348,12 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     fileActivityWatcher?.close();
     flushLineBuffer();
     if (shouldKill && !child.killed) child.kill();
-    activeProcess = undefined;
+    const currentRun = activeRuns.get(runId);
+    if (currentRun) currentRun.child = undefined;
 
-    if (stopRequestedForRun === runId) {
-      if (activeRunId === runId) activeRunCancel = undefined;
+    if (stopRequestedRuns.has(runId)) {
+      activeRuns.delete(runId);
+      stopRequestedRuns.delete(runId);
       resolveInner?.({ ok: false, code: -3, output: fullText });
       return;
     }
@@ -1362,29 +1366,32 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       const delay = RETRY_DELAYS[retryCount] || 30000;
       console.log(`[mimo] retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}), code: ${code}`);
       if (streamToWindow) {
-        mainWindow?.webContents.send("mimo:output", { type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
-        mainWindow?.webContents.send("mimo:output", { type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
+        mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
+        mainWindow?.webContents.send("mimo:output", { chatId, type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
       }
-      activeRetryTimer = setTimeout(() => {
-        activeRetryTimer = undefined;
-        if (stopRequestedForRun === runId) {
-          if (activeRunId === runId) activeRunCancel = undefined;
+      const retryTimer = setTimeout(() => {
+        const retryRun = activeRuns.get(runId);
+        if (retryRun) retryRun.retryTimer = undefined;
+        if (stopRequestedRuns.has(runId)) {
+          activeRuns.delete(runId);
+          stopRequestedRuns.delete(runId);
           resolveInner?.({ ok: false, code: -3, output: fullText });
           return;
         }
-        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId, envExtra).then((r) => {
+        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId, envExtra, chatId, runMessage).then((r) => {
           resolveInner?.(r);
           return r;
         }));
       }, delay);
+      const retryRun = activeRuns.get(runId);
+      if (retryRun) retryRun.retryTimer = retryTimer;
       return;
     }
 
     if (code !== 0 && streamToWindow) {
-      const lastMsg = activeChatSnapshot();
       mainWindow?.webContents.send("mimo:interrupted", {
-        chatId: lastMsg?.chatId || "",
-        message: lastMsg?.message || "",
+        chatId,
+        message: runMessage,
         code,
         stderr: (stderrText || (hasOutput ? "Response was interrupted before completion." : "")).slice(0, 500),
         attempt: retryCount + 1,
@@ -1392,7 +1399,8 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       });
     }
 
-    if (activeRunId === runId) activeRunCancel = undefined;
+    activeRuns.delete(runId);
+    if (chatId && latestRunByChat.get(chatId) === runId) latestRunByChat.delete(chatId);
     resolveInner?.({ ok: code === 0, code, output: fullText || stderrText });
   };
   resolveInner = resolve;
@@ -1403,6 +1411,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     idleTimer = setTimeout(() => {
       if (!settled && streamToWindow) {
         mainWindow?.webContents.send("mimo:output", {
+          chatId,
           type: "activity",
           text: "Still waiting for Movo...",
           detail: "Keeping the connection alive on a slow network"
@@ -1448,11 +1457,11 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
           }
 
           if (activity && streamToWindow) {
-            mainWindow?.webContents.send("mimo:output", { type: "activity", ...activity, step: stepCount });
+            mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", ...activity, step: stepCount });
           }
           if (text) {
             fullText += text;
-            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text });
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stdout", text });
           }
           if (isCompletionEvent(event)) {
             finishRun(0, true);
@@ -1462,7 +1471,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
         } catch {
           lastEventTime = Date.now();
           if (!line.includes("<system-reminder>") && !line.includes("</system-reminder>")) {
-            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { type: "stdout", text: line + "\n" });
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stdout", text: line + "\n" });
             fullText += line + "\n";
           }
           markActivity();
@@ -1477,9 +1486,9 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       console.log("[mimo] stderr:", t);
       const permMatch = t.match(/permission requested:\s*(\S+)\s*\(([^)]+)\)/);
       if (permMatch && streamToWindow) {
-        mainWindow?.webContents.send("mimo:permission", { type: permMatch[1], target: permMatch[2], raw: t });
+        mainWindow?.webContents.send("mimo:permission", { chatId, type: permMatch[1], target: permMatch[2], raw: t });
       } else if (streamToWindow) {
-        mainWindow?.webContents.send("mimo:output", { type: "activity", text: summarizeStderrActivity(t) });
+        mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", text: summarizeStderrActivity(t) });
       }
       markActivity();
     });
@@ -1548,19 +1557,24 @@ function killProcessTree(child: ChildProcessWithoutNullStreams) {
 
 function openExternalTerminal(cwd: string) {
   if (platform() === "win32") {
-    const script = [
-      "$cwd = $args[0]",
-      "if (Get-Command wt.exe -ErrorAction SilentlyContinue) {",
-      "  Start-Process wt.exe -ArgumentList @('-d', $cwd)",
-      "} else {",
-      "  Start-Process powershell.exe -WorkingDirectory $cwd -ArgumentList @('-NoLogo', '-NoExit')",
-      "}"
-    ].join("; ");
-    spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script, cwd], {
+    const wt = spawn("wt.exe", ["-d", cwd], {
       detached: true,
       windowsHide: true,
       stdio: "ignore"
-    }).unref();
+    });
+    let fellBack = false;
+    const fallback = () => {
+      if (fellBack) return;
+      fellBack = true;
+      spawn("cmd.exe", ["/d", "/s", "/c", "start", "\"\"", "powershell.exe", "-NoLogo", "-NoExit", "-Command", `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`], {
+        detached: true,
+        windowsHide: true,
+        stdio: "ignore"
+      }).unref();
+    };
+    wt.once("error", fallback);
+    wt.once("exit", (code) => { if (code && code !== 0) fallback(); });
+    wt.unref();
     return;
   }
 
@@ -2063,12 +2077,4 @@ function isCompletionEvent(event: any): boolean {
     return reason === "stop" || reason === "end_turn" || reason === "max_tokens";
   }
   return false;
-}
-
-let lastRunChatId = "";
-let lastRunMessage = "";
-
-function activeChatSnapshot() {
-  if (!lastRunChatId) return null;
-  return { chatId: lastRunChatId, message: lastRunMessage };
 }

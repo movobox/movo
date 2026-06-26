@@ -21,9 +21,9 @@ contextBridge.exposeInMainWorld("studio", {
     return ipcRenderer.invoke("mimo:run", payload);
   },
   listSessions: () => ipcRenderer.invoke("mimo:sessions"),
-  stopMimo: () => ipcRenderer.invoke("mimo:stop"),
-  onMimoOutput: (callback: (event: { type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => void) => {
-    const handler = (_: unknown, data: { type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => callback(data);
+  stopMimo: (payload?: unknown) => ipcRenderer.invoke("mimo:stop", payload),
+  onMimoOutput: (callback: (event: { chatId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => void) => {
+    const handler = (_: unknown, data: { chatId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => callback(data);
     ipcRenderer.on("mimo:output", handler);
     return () => ipcRenderer.removeListener("mimo:output", handler);
   },
@@ -32,12 +32,12 @@ contextBridge.exposeInMainWorld("studio", {
     ipcRenderer.on("mimo:interrupted", handler);
     return () => ipcRenderer.removeListener("mimo:interrupted", handler);
   },
-  onMimoPermission: (callback: (event: { type: string; target: string; raw: string }) => void) => {
-    const handler = (_: unknown, data: { type: string; target: string; raw: string }) => callback(data);
+  onMimoPermission: (callback: (event: { chatId?: string; type: string; target: string; raw: string }) => void) => {
+    const handler = (_: unknown, data: { chatId?: string; type: string; target: string; raw: string }) => callback(data);
     ipcRenderer.on("mimo:permission", handler);
     return () => ipcRenderer.removeListener("mimo:permission", handler);
   },
-  approvePermission: (type: string) => ipcRenderer.invoke("mimo:approve-perm", type),
+  approvePermission: (payload: unknown) => ipcRenderer.invoke("mimo:approve-perm", payload),
   createTerminalProcess: (payload: unknown) => ipcRenderer.invoke("terminal:create", payload),
   writeTerminalInput: (payload: unknown) => ipcRenderer.invoke("terminal:input", payload),
   resizeTerminal: (payload: unknown) => ipcRenderer.invoke("terminal:resize", payload),

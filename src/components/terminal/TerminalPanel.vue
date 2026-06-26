@@ -18,8 +18,10 @@ const studio = useStudioStore();
 const { t } = useI18n();
 const hosts = ref<Record<string, HTMLElement | null>>({});
 const runtimes = new Map<string, TerminalRuntime>();
+const terminalBuffers = new Map<string, string>();
 let dataUnsubscribe: (() => void) | undefined;
 let resizeObserver: ResizeObserver | undefined;
+const maxBufferLength = 200_000;
 
 function terminalTheme() {
   return {
@@ -118,6 +120,8 @@ function mountRuntime(terminalId: string) {
   });
   const runtime = { terminal, fit, host };
   runtimes.set(terminalId, runtime);
+  const buffered = terminalBuffers.get(terminalId);
+  if (buffered) terminal.write(buffered);
   resizeObserver?.observe(host);
   scheduleFit(terminalId);
   if (studio.activeTerminalId === terminalId) terminal.focus();
@@ -135,6 +139,7 @@ function syncRuntimes() {
 
 function clearActiveTerminal() {
   const runtime = studio.activeTerminalId ? runtimes.get(studio.activeTerminalId) : null;
+  if (studio.activeTerminalId) terminalBuffers.delete(studio.activeTerminalId);
   runtime?.terminal.clear();
   runtime?.terminal.focus();
 }
@@ -153,7 +158,7 @@ function toggleFloating() {
 }
 
 watch(
-  () => studio.terminalSessions.map((terminal) => terminal.id).join(","),
+  () => `${studio.activeChat?.id || "default"}:${studio.terminalSessions.map((terminal) => terminal.id).join(",")}`,
   () => void nextTick(syncRuntimes)
 );
 
@@ -172,6 +177,9 @@ watch(
 
 onMounted(() => {
   dataUnsubscribe = window.studio.onTerminalData((event) => {
+    const previous = terminalBuffers.get(event.terminalId) || "";
+    const next = `${previous}${event.data}`;
+    terminalBuffers.set(event.terminalId, next.length > maxBufferLength ? next.slice(-maxBufferLength) : next);
     runtimes.get(event.terminalId)?.terminal.write(event.data);
   });
   resizeObserver = new ResizeObserver(() => fitActiveTerminal());

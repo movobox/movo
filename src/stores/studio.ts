@@ -17,24 +17,31 @@ export const useStudioStore = defineStore("studio", () => {
   const chats = ref<Chat[]>([]);
   const draftChat = ref<Chat | null>(null);
   const activeChatId = ref("");
-  const terminalSessions = ref<TerminalSession[]>([]);
-  const activeTerminalId = ref("");
+  type TerminalScope = { sessions: TerminalSession[]; activeId: string };
+  const terminalScopes = ref<Record<string, TerminalScope>>({});
   const cliStatus = ref<CliStatus>({ installed: false, version: "", checked: false });
-  const isRunning = ref(false);
-  const isStopping = ref(false);
   const showSettings = ref(false);
   const showTerminal = ref(false);
   const terminalFloating = ref(false);
   const showAgentMenu = ref(false);
   const showModelMenu = ref(false);
   const deleteConfirmId = ref("");
-  const streamingText = ref("");
-  const runActivities = ref<{ text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string }[]>([]);
+  type RunActivity = { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
   type TimelineItem =
     | { kind: "text"; text: string }
     | { kind: "activity"; text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
-  const runTimeline = ref<TimelineItem[]>([]);
-  const pendingPermissions = ref<PermissionEvent[]>([]);
+  type RunState = {
+    isRunning: boolean;
+    isStopping: boolean;
+    stopRequested: boolean;
+    streamingText: string;
+    activities: RunActivity[];
+    timeline: TimelineItem[];
+    pendingPermissions: PermissionEvent[];
+    interruptedRun: InterruptedEvent | null;
+    startedAt: number;
+  };
+  const runStates = ref<Record<string, RunState>>({});
   const projectFiles = ref<ProjectFile[]>([]);
   const filePickerOpen = ref(false);
   const filePickerQuery = ref("");
@@ -47,7 +54,6 @@ export const useStudioStore = defineStore("studio", () => {
   const isPinnedToBottom = ref(true);
   const showScrollToBottom = ref(false);
   const droppedFiles = ref<string[]>([]);
-  const interruptedRun = ref<InterruptedEvent | null>(null);
 
   let disconnectTimer: ReturnType<typeof setInterval> | null = null;
   let saveChatsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -57,15 +63,37 @@ export const useStudioStore = defineStore("studio", () => {
   let permissionUnsubscribe: (() => void) | undefined;
   let terminalExitUnsubscribe: (() => void) | undefined;
   let interruptedUnsubscribe: (() => void) | undefined;
-  let stopRequested = false;
   const bottomThreshold = 96;
 
   const activeChat = computed(() => draftChat.value || chats.value.find((c) => c.id === activeChatId.value) || null);
   const activeTitle = computed(() => activeChat.value?.title || translate("untitled"));
   const currentModel = computed(() => appSettings.value.model || "MiMo Auto");
+  const terminalScopeKey = computed(() => activeChat.value ? `chat:${activeChat.value.id}` : "default");
+  function currentTerminalScope() {
+    const key = terminalScopeKey.value;
+    if (!terminalScopes.value[key]) terminalScopes.value[key] = { sessions: [], activeId: "" };
+    return terminalScopes.value[key];
+  }
+  function findTerminalScope(terminalId: string) {
+    return Object.values(terminalScopes.value).find((scope) => scope.sessions.some((terminal) => terminal.id === terminalId)) || null;
+  }
+  const terminalSessions = computed(() => currentTerminalScope().sessions);
+  const activeTerminalId = computed({
+    get: () => currentTerminalScope().activeId,
+    set: (terminalId: string) => { currentTerminalScope().activeId = terminalId; }
+  });
   const activeTerminal = computed(() => terminalSessions.value.find((terminal) => terminal.id === activeTerminalId.value) || null);
   const runningTerminals = computed(() => terminalSessions.value.filter((terminal) => terminal.running));
   const hasRunningTerminal = computed(() => runningTerminals.value.length > 0);
+  const activeRunState = computed(() => activeChat.value ? runStates.value[activeChat.value.id] || null : null);
+  const isRunning = computed(() => Boolean(activeRunState.value?.isRunning));
+  const isStopping = computed(() => Boolean(activeRunState.value?.isStopping));
+  const streamingText = computed(() => activeRunState.value?.streamingText || "");
+  const runActivities = computed(() => activeRunState.value?.activities || []);
+  const runTimeline = computed(() => activeRunState.value?.timeline || []);
+  const pendingPermissions = computed(() => activeRunState.value?.pendingPermissions || []);
+  const interruptedRun = computed(() => activeRunState.value?.interruptedRun || null);
+  const hasAnyRunningChat = computed(() => Object.values(runStates.value).some((state) => state.isRunning));
   const isAgentCommandActive = computed(() => pendingPermissions.value.some((permission) => ["bash", "shell", "command"].includes(permission.type.toLowerCase())));
   const projectRoot = computed(() => activeChat.value?.folder || chats.value.find((chat) => chat.folder)?.folder || "");
   const activeDraft = computed({
@@ -128,6 +156,29 @@ export const useStudioStore = defineStore("studio", () => {
     if (!hydrated) return;
     if (saveUiTimer) clearTimeout(saveUiTimer);
     saveUiTimer = setTimeout(() => void persistUiState(), 250);
+  }
+
+  function makeRunState(startedAt = Date.now()): RunState {
+    return {
+      isRunning: false,
+      isStopping: false,
+      stopRequested: false,
+      streamingText: "",
+      activities: [],
+      timeline: [],
+      pendingPermissions: [],
+      interruptedRun: null,
+      startedAt
+    };
+  }
+
+  function ensureRunState(chatId: string) {
+    if (!runStates.value[chatId]) runStates.value[chatId] = makeRunState();
+    return runStates.value[chatId];
+  }
+
+  function clearRunState(chatId: string) {
+    delete runStates.value[chatId];
   }
 
   function settingsFromProjectConfig(config: unknown) {
@@ -301,10 +352,10 @@ export const useStudioStore = defineStore("studio", () => {
     if (chat.messages.length === 1) chat.title = text.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
-    streamingText.value = "";
-    runTimeline.value = [];
     const runStartedAt = Date.now();
-    runActivities.value = [{
+    const runState = makeRunState(runStartedAt);
+    runState.isRunning = true;
+    runState.activities = [{
       text: "Understanding request",
       detail: [
         `Request:\n${text}`,
@@ -314,10 +365,7 @@ export const useStudioStore = defineStore("studio", () => {
       text: "Preparing workspace",
       detail: "Loading project settings, hidden Movo defaults, and relevant context before the engine starts."
     }];
-    pendingPermissions.value = [];
-    isRunning.value = true;
-    isStopping.value = false;
-    stopRequested = false;
+    runStates.value[chat.id] = runState;
     await nextTick();
     scrollToBottom("smooth");
 
@@ -332,26 +380,26 @@ export const useStudioStore = defineStore("studio", () => {
       };
       const result = await window.studio.runMimo(payload);
       const finalText = result.output.trim();
-      const activityLog = formatRunActivities(runActivities.value, Date.now() - runStartedAt);
+      const activityLog = formatRunActivities(runState.activities, Date.now() - runStartedAt);
       if (activityLog) chat.messages.push(makeMessage("system", activityLog));
-      if (stopRequested) {
-        if (streamingText.value.trim()) {
-          chat.messages.push(makeMessage("assistant", streamingText.value.trim()));
+      if (runState.stopRequested) {
+        if (runState.streamingText.trim()) {
+          chat.messages.push(makeMessage("assistant", runState.streamingText.trim()));
         } else if (finalText) {
           chat.messages.push(makeMessage("assistant", finalText));
         }
-        streamingText.value = "";
+        runState.streamingText = "";
         chat.messages.push(makeMessage("system", translate("stoppedByUser")));
-      } else if (!result.ok && finalText && interruptedRun.value) {
-        streamingText.value = "";
+      } else if (!result.ok && finalText && runState.interruptedRun) {
+        runState.streamingText = "";
         chat.messages.push(makeMessage("assistant", finalText));
         chat.messages.push(makeMessage("system", translate("interruptedTitle")));
       } else if (finalText) {
-        streamingText.value = "";
+        runState.streamingText = "";
         chat.messages.push(makeMessage(result.ok ? "assistant" : "system", finalText));
-      } else if (streamingText.value.trim()) {
-        chat.messages.push(makeMessage(result.ok ? "assistant" : "system", streamingText.value.trim()));
-        streamingText.value = "";
+      } else if (runState.streamingText.trim()) {
+        chat.messages.push(makeMessage(result.ok ? "assistant" : "system", runState.streamingText.trim()));
+        runState.streamingText = "";
       } else {
         chat.messages.push(makeMessage("system", `Exit code ${result.code}`));
       }
@@ -368,13 +416,14 @@ export const useStudioStore = defineStore("studio", () => {
       chat.messages.push(makeMessage("system", `Error: ${String(e)}`));
       schedulePersistence();
     } finally {
-      isRunning.value = false;
-      isStopping.value = false;
-      stopRequested = false;
-      streamingText.value = "";
-      runActivities.value = [];
-      runTimeline.value = [];
-      pendingPermissions.value = [];
+      runState.isRunning = false;
+      runState.isStopping = false;
+      runState.stopRequested = false;
+      runState.streamingText = "";
+      runState.activities = [];
+      runState.timeline = [];
+      runState.pendingPermissions = [];
+      if (!runState.interruptedRun) clearRunState(chat.id);
       await nextTick();
       scrollMessages({ behavior: "smooth" });
       void processQueue();
@@ -426,18 +475,19 @@ export const useStudioStore = defineStore("studio", () => {
     chat.messages.push(makeMessage("user", `!${command}`));
     chat.draft = "";
     const runStartedAt = Date.now();
-    runActivities.value = [{ text: "Running command", detail: `Command:\n${command}\nWorking directory: ${chat.folder || "."}` }];
-    isRunning.value = true;
+    const runState = makeRunState(runStartedAt);
+    runState.isRunning = true;
+    runState.activities = [{ text: "Running command", detail: `Command:\n${command}\nWorking directory: ${chat.folder || "."}` }];
+    runStates.value[chat.id] = runState;
     await nextTick();
     scrollToBottom("smooth");
     const result = await window.studio.runShellCommand({ command, cwd: chat.folder });
     const output = result.output.trim() || "(no output)";
-    const activityLog = formatRunActivities(runActivities.value, Date.now() - runStartedAt);
+    const activityLog = formatRunActivities(runState.activities, Date.now() - runStartedAt);
     if (activityLog) chat.messages.push(makeMessage("system", activityLog));
     chat.messages.push(makeMessage("system", `Command output entered context:\n\n\`\`\`text\n${output.slice(0, 12000)}\n\`\`\``));
     chat.updatedAt = now();
-    isRunning.value = false;
-    runActivities.value = [];
+    clearRunState(chat.id);
     schedulePersistence();
     await nextTick();
     scrollToBottom("smooth");
@@ -506,7 +556,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   async function processQueue() {
     const chat = activeChat.value;
-    if (!chat || chat.queuedMessages.length === 0 || isRunning.value) return;
+    if (!chat || chat.queuedMessages.length === 0 || runStates.value[chat.id]?.isRunning) return;
     const next = chat.queuedMessages.shift();
     if (!next) return;
     chat.draft = next.text;
@@ -543,20 +593,29 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   async function stopRun() {
-    if (!isRunning.value || isStopping.value) return;
-    stopRequested = true;
-    isStopping.value = true;
-    await window.studio.stopMimo();
+    const chat = activeChat.value;
+    if (!chat) return;
+    const runState = runStates.value[chat.id];
+    if (!runState?.isRunning || runState.isStopping) return;
+    runState.stopRequested = true;
+    runState.isStopping = true;
+    await window.studio.stopMimo({ chatId: chat.id });
   }
 
   function dismissInterrupted() {
-    interruptedRun.value = null;
+    const chat = activeChat.value;
+    if (!chat) return;
+    const runState = runStates.value[chat.id];
+    if (!runState) return;
+    runState.interruptedRun = null;
+    if (!runState.isRunning) clearRunState(chat.id);
   }
 
   async function resumeInterruptedRun() {
     const interrupted = interruptedRun.value;
     if (!interrupted) return;
-    interruptedRun.value = null;
+    const runState = runStates.value[interrupted.chatId];
+    if (runState) runState.interruptedRun = null;
     const chat = activeChat.value;
     if (!chat) return;
     const prompt = interrupted.message || [...chat.messages].reverse().find((m) => m.role === "user")?.text || "";
@@ -567,37 +626,39 @@ export const useStudioStore = defineStore("studio", () => {
     void runPrompt();
   }
 
-  function pushRunActivity(text: string, detail = "", code?: string, codeLang?: string, oldCode?: string, newCode?: string, editFilePath?: string) {
+  function pushRunActivity(chatId: string, text: string, detail = "", code?: string, codeLang?: string, oldCode?: string, newCode?: string, editFilePath?: string) {
     const clean = text.trim();
     if (!clean) return;
-    const last = runActivities.value[runActivities.value.length - 1];
+    const runState = ensureRunState(chatId);
+    const last = runState.activities[runState.activities.length - 1];
     if (last && last.text === clean && last.detail === detail.trim() && last.code === code) return;
-    runActivities.value.push({ text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
-    if (runActivities.value.length > 50) {
-      runActivities.value.splice(0, runActivities.value.length - 50);
+    runState.activities.push({ text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (runState.activities.length > 50) {
+      runState.activities.splice(0, runState.activities.length - 50);
     }
-    runTimeline.value.push({ kind: "activity", text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
-    if (runTimeline.value.length > 200) {
-      runTimeline.value.splice(0, runTimeline.value.length - 200);
+    runState.timeline.push({ kind: "activity", text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (runState.timeline.length > 200) {
+      runState.timeline.splice(0, runState.timeline.length - 200);
     }
   }
 
   async function createTerminal() {
+    const scope = currentTerminalScope();
     const id = uid();
-    const index = terminalSessions.value.length + 1;
+    const index = scope.sessions.length + 1;
     const cwd = projectRoot.value;
-    terminalSessions.value.push({
+    scope.sessions.push({
       id,
       title: `Terminal ${index}`,
       cwd,
       running: true,
       exitCode: null
     });
-    activeTerminalId.value = id;
+    scope.activeId = id;
     showTerminal.value = true;
     const result = await window.studio.createTerminalProcess({ terminalId: id, cwd });
     if (!result.ok) {
-      const terminal = terminalSessions.value.find((item) => item.id === id);
+      const terminal = scope.sessions.find((item) => item.id === id);
       if (terminal) {
         terminal.running = false;
         terminal.exitCode = -1;
@@ -606,8 +667,9 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   function ensureTerminal() {
-    if (!terminalSessions.value.length) void createTerminal();
-    if (!activeTerminalId.value) activeTerminalId.value = terminalSessions.value[0]?.id || "";
+    const scope = currentTerminalScope();
+    if (!scope.sessions.length) void createTerminal();
+    if (!scope.activeId) scope.activeId = scope.sessions[0]?.id || "";
   }
 
   function openTerminalPanel() {
@@ -621,24 +683,29 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   function selectTerminal(terminalId: string) {
-    activeTerminalId.value = terminalId;
+    const scope = currentTerminalScope();
+    if (scope.sessions.some((terminal) => terminal.id === terminalId)) scope.activeId = terminalId;
   }
 
   async function closeTerminal(terminalId: string) {
-    const terminal = terminalSessions.value.find((item) => item.id === terminalId);
+    const scope = findTerminalScope(terminalId);
+    if (!scope) return;
+    const terminal = scope.sessions.find((item) => item.id === terminalId);
     if (terminal?.running) await stopTerminalCommand(terminalId);
-    terminalSessions.value = terminalSessions.value.filter((item) => item.id !== terminalId);
-    if (activeTerminalId.value === terminalId) {
-      activeTerminalId.value = terminalSessions.value[0]?.id || "";
+    const index = scope.sessions.findIndex((item) => item.id === terminalId);
+    if (index >= 0) scope.sessions.splice(index, 1);
+    if (scope.activeId === terminalId) {
+      scope.activeId = scope.sessions[0]?.id || "";
     }
-    if (!terminalSessions.value.length) {
-      activeTerminalId.value = "";
+    if (scope === currentTerminalScope() && !scope.sessions.length) {
+      scope.activeId = "";
       showTerminal.value = false;
     }
   }
 
   async function stopTerminalCommand(terminalId = activeTerminalId.value) {
-    const terminal = terminalSessions.value.find((item) => item.id === terminalId);
+    const scope = findTerminalScope(terminalId);
+    const terminal = scope?.sessions.find((item) => item.id === terminalId);
     if (!terminal) return;
     await window.studio.stopTerminalCommand(terminalId);
     terminal.running = false;
@@ -650,7 +717,8 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   function handleTerminalExit(event: TerminalExitEvent) {
-    const terminal = terminalSessions.value.find((item) => item.id === event.terminalId);
+    const scope = findTerminalScope(event.terminalId);
+    const terminal = scope?.sessions.find((item) => item.id === event.terminalId);
     if (!terminal) return;
     terminal.running = false;
     terminal.exitCode = event.code;
@@ -658,12 +726,18 @@ export const useStudioStore = defineStore("studio", () => {
   }
 
   async function approvePermission(permType: string) {
-    pendingPermissions.value = pendingPermissions.value.filter((p) => p.type !== permType);
-    await window.studio.approvePermission(permType);
+    const chat = activeChat.value;
+    if (!chat) return;
+    const runState = runStates.value[chat.id];
+    if (runState) runState.pendingPermissions = runState.pendingPermissions.filter((p) => p.type !== permType);
+    await window.studio.approvePermission({ type: permType, chatId: chat.id });
   }
 
   function denyPermission(permType: string) {
-    pendingPermissions.value = pendingPermissions.value.filter((p) => p.type !== permType);
+    const chat = activeChat.value;
+    if (!chat) return;
+    const runState = runStates.value[chat.id];
+    if (runState) runState.pendingPermissions = runState.pendingPermissions.filter((p) => p.type !== permType);
   }
 
   function updateFilePickerFromDraft() {
@@ -760,7 +834,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   async function revertTo(msgId: string) {
     const chat = activeChat.value;
-    if (!chat || isRunning.value) return;
+    if (!chat || runStates.value[chat.id]?.isRunning) return;
     const idx = chat.messages.findIndex((m) => m.id === msgId);
     if (idx < 0) return;
     const message = chat.messages[idx];
@@ -885,37 +959,44 @@ export const useStudioStore = defineStore("studio", () => {
     await checkCli();
     await loadProjectFiles();
     outputUnsubscribe = window.studio.onMimoOutput((event) => {
-      if (event.type === "activity" && isRunning.value) {
-        pushRunActivity(event.text, event.detail || "", event.code, event.codeLang, event.oldCode, event.newCode, event.editFilePath);
-        void nextTick(() => scrollMessages({ behavior: "smooth" }));
-      } else if (event.type === "stdout" && isRunning.value) {
-        if (!streamingText.value.trim()) pushRunActivity(translate("writingFinal"));
-        streamingText.value += event.text;
-        const last = runTimeline.value[runTimeline.value.length - 1];
+      const chatId = event.chatId || activeChat.value?.id || "";
+      const runState = chatId ? runStates.value[chatId] : null;
+      if (!chatId || !runState?.isRunning) return;
+      const isActiveRun = activeChat.value?.id === chatId;
+      if (event.type === "activity") {
+        pushRunActivity(chatId, event.text, event.detail || "", event.code, event.codeLang, event.oldCode, event.newCode, event.editFilePath);
+        if (isActiveRun) void nextTick(() => scrollMessages({ behavior: "smooth" }));
+      } else if (event.type === "stdout") {
+        if (!runState.streamingText.trim()) pushRunActivity(chatId, translate("writingFinal"));
+        runState.streamingText += event.text;
+        const last = runState.timeline[runState.timeline.length - 1];
         if (last && last.kind === "text") {
           last.text += event.text;
         } else {
-          runTimeline.value.push({ kind: "text", text: event.text });
+          runState.timeline.push({ kind: "text", text: event.text });
         }
-        void nextTick(() => scrollMessages({ behavior: "auto" }));
-      } else if (event.type === "stderr" && isRunning.value) {
-        pushRunActivity(event.text);
-        void nextTick(() => scrollMessages({ behavior: "smooth" }));
+        if (isActiveRun) void nextTick(() => scrollMessages({ behavior: "auto" }));
+      } else if (event.type === "stderr") {
+        pushRunActivity(chatId, event.text);
+        if (isActiveRun) void nextTick(() => scrollMessages({ behavior: "smooth" }));
       }
     });
     permissionUnsubscribe = window.studio.onMimoPermission((event) => {
-      if (isRunning.value) {
-        const exists = pendingPermissions.value.some((p) => p.type === event.type && p.target === event.target);
-        if (!exists) pendingPermissions.value.push(event);
-        pushRunActivity(`${translate("permRequested")}: ${event.type}`);
+      const chatId = event.chatId || activeChat.value?.id || "";
+      const runState = chatId ? runStates.value[chatId] : null;
+      if (chatId && runState?.isRunning) {
+        const exists = runState.pendingPermissions.some((p) => p.type === event.type && p.target === event.target);
+        if (!exists) runState.pendingPermissions.push(event);
+        pushRunActivity(chatId, `${translate("permRequested")}: ${event.type}`);
         void nextTick(() => scrollMessages({ behavior: "smooth" }));
       }
     });
     terminalExitUnsubscribe = window.studio.onTerminalExit(handleTerminalExit);
     if (typeof window.studio.onMimoInterrupted === "function") {
       interruptedUnsubscribe = window.studio.onMimoInterrupted((event) => {
-        interruptedRun.value = event;
-        void nextTick(() => scrollMessages({ behavior: "smooth" }));
+        const runState = ensureRunState(event.chatId);
+        runState.interruptedRun = event;
+        if (activeChat.value?.id === event.chatId) void nextTick(() => scrollMessages({ behavior: "smooth" }));
       });
     }
     checkConnection();
@@ -938,6 +1019,9 @@ export const useStudioStore = defineStore("studio", () => {
   });
   watch(appSettings, saveAppSettings, { deep: true });
   watch(activeChatId, scheduleUiSave);
+  watch(terminalScopeKey, () => {
+    if (showTerminal.value) ensureTerminal();
+  });
   watch(() => activeChat.value?.folder, () => void loadProjectFiles());
   watch(activeDraft, updateFilePickerFromDraft);
   watch(draftChat, scheduleUiSave, { deep: true });

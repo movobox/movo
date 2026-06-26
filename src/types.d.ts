@@ -69,6 +69,7 @@ export type StudioSettings = {
 };
 
 export type OutputEvent = {
+  chatId?: string;
   type: string;
   text: string;
   detail?: string;
@@ -111,6 +112,7 @@ export type ProjectChanges = {
 };
 
 export type PermissionEvent = {
+  chatId?: string;
   type: string;
   target: string;
   raw: string;
@@ -150,11 +152,11 @@ declare global {
         extraFiles: string[];
       }) => Promise<{ ok: boolean; code: number; output: string }>;
       listSessions: () => Promise<{ ok: boolean; code: number; output: string }>;
-      stopMimo: () => Promise<{ ok: boolean }>;
+      stopMimo: (payload?: { chatId?: string }) => Promise<{ ok: boolean }>;
       onMimoOutput: (callback: (event: OutputEvent) => void) => () => void;
       onMimoInterrupted: (callback: (event: InterruptedEvent) => void) => () => void;
       onMimoPermission: (callback: (event: PermissionEvent) => void) => () => void;
-      approvePermission: (type: string) => Promise<{ ok: boolean }>;
+      approvePermission: (payload: string | { type: string; chatId?: string }) => Promise<{ ok: boolean }>;
       createTerminalProcess: (payload: { terminalId: string; cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
       writeTerminalInput: (payload: { terminalId: string; data: string }) => Promise<{ ok: boolean }>;
       resizeTerminal: (payload: { terminalId: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
