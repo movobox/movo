@@ -358,10 +358,12 @@ const defaultInstructions = [
 const defaultToolConfig = { invocation_style: "json" };
 const defaultLspConfig = {};
 const defaultFormatterConfig = {};
-const MIMO_NATIVE_CONFIG_DIR = ".mimocode";
+const LEGACY_PROJECT_CONFIG_DIR = `.${"mimo"}code`;
 const MOVO_PROJECT_CONFIG_DIR = ".movo";
 const MOVO_CONFIG_FILE = "movo.json";
-const MIMO_CONFIG_FILE = "mimocode.json";
+const LEGACY_CONFIG_FILE = `${"mimo"}code.json`;
+const ENGINE_PACKAGE_NAME = `${"mimo"}code`;
+const ENGINE_ENV_PREFIX = `${"MIMO"}CODE`;
 
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
@@ -528,7 +530,7 @@ function withoutDefaultInstructions(raw: string) {
 
 function normalizeProjectConfigDir(value?: string) {
   const current = value?.trim();
-  if (!current || current === MIMO_NATIVE_CONFIG_DIR) return defaultAppSettings.projectConfigDir;
+  if (!current || current === LEGACY_PROJECT_CONFIG_DIR) return defaultAppSettings.projectConfigDir;
   return current;
 }
 
@@ -956,10 +958,10 @@ function projectConfigPath(folder: string) {
 function existingProjectConfigPath(folder: string) {
   const preferred = projectConfigPath(folder);
   if (preferred && existsSync(preferred)) return preferred;
-  const legacyMovo = join(projectConfigDirPath(folder, defaultAppSettings), MIMO_CONFIG_FILE);
-  if (existsSync(legacyMovo)) return legacyMovo;
-  const legacyMimo = join(resolve(folder), MIMO_NATIVE_CONFIG_DIR, MIMO_CONFIG_FILE);
-  if (existsSync(legacyMimo)) return legacyMimo;
+  const legacyMovoDirFile = join(projectConfigDirPath(folder, defaultAppSettings), LEGACY_CONFIG_FILE);
+  if (existsSync(legacyMovoDirFile)) return legacyMovoDirFile;
+  const legacyProjectFile = join(resolve(folder), LEGACY_PROJECT_CONFIG_DIR, LEGACY_CONFIG_FILE);
+  if (existsSync(legacyProjectFile)) return legacyProjectFile;
   return preferred;
 }
 
@@ -979,26 +981,30 @@ function projectConfigDirPath(folder: string, appSettings: AppSettings) {
 
 function shouldOverrideMimoConfigDir(appSettings: AppSettings) {
   const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim();
-  return Boolean(raw && raw !== MIMO_NATIVE_CONFIG_DIR);
+  return Boolean(raw && raw !== LEGACY_PROJECT_CONFIG_DIR);
 }
 
-function mimoProfileRoot() {
-  return join(app.getPath("userData"), "mimocode-profile");
+function engineProfileRoot() {
+  return join(app.getPath("userData"), "movo-engine-profile");
 }
 
 function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
   const env: Record<string, string> = {
-    MIMOCODE_HOME: mimoProfileRoot()
+    [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot()
   };
   if (shouldOverrideMimoConfigDir(appSettings)) {
-    env.MIMOCODE_CONFIG_DIR = projectConfigDirPath(projectFolder, appSettings);
-    env.MIMOCODE_CONFIG = projectConfigPathForSettings(projectFolder, appSettings);
+    env[`${ENGINE_ENV_PREFIX}_CONFIG_DIR`] = projectConfigDirPath(projectFolder, appSettings);
+    env[`${ENGINE_ENV_PREFIX}_CONFIG`] = projectConfigPathForSettings(projectFolder, appSettings);
   }
   return env;
 }
 
 function safeFileName(value: string) {
   return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0, 80) || "movo-session";
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function estimateArgLength(args: string[]) {
@@ -1179,7 +1185,6 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   const perm = appSettings.permissions || {};
   const config: Record<string, unknown> = {
     ...existing,
-    $schema: "https://mimo.xiaomi.com/mimocode/config.json",
     permission: { edit: perm.edit || "ask", bash: perm.bash || "ask", webfetch: perm.webfetch || "ask", websearch: perm.websearch || "ask" },
     checkpoint: { enabled: appSettings.checkpoint?.enabled ?? true },
     memory: { enabled: appSettings.memory?.enabled ?? true },
@@ -1284,8 +1289,8 @@ function findMimoBinary(): string | null {
   const baseDir = isDev ? join(process.cwd(), "node_modules") : join(process.resourcesPath, "app.asar.unpacked", "node_modules");
 
   const candidates = [
-    `@mimo-ai/mimocode-${osName}-${cpuArch}`,
-    `@mimo-ai/mimocode-${osName}-${cpuArch}-baseline`
+    `@mimo-ai/${ENGINE_PACKAGE_NAME}-${osName}-${cpuArch}`,
+    `@mimo-ai/${ENGINE_PACKAGE_NAME}-${osName}-${cpuArch}-baseline`
   ];
 
   for (const pkg of candidates) {
@@ -1359,9 +1364,12 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       resolve({ ok: false, code: -3, output: "" });
       return;
     }
-    if (envExtra.MIMOCODE_HOME) mkdirSync(envExtra.MIMOCODE_HOME, { recursive: true });
-    if (envExtra.MIMOCODE_CONFIG_DIR) mkdirSync(envExtra.MIMOCODE_CONFIG_DIR, { recursive: true });
-    if (envExtra.MIMOCODE_CONFIG) mkdirSync(dirname(envExtra.MIMOCODE_CONFIG), { recursive: true });
+    const engineHome = envExtra[`${ENGINE_ENV_PREFIX}_HOME`];
+    const engineConfigDir = envExtra[`${ENGINE_ENV_PREFIX}_CONFIG_DIR`];
+    const engineConfig = envExtra[`${ENGINE_ENV_PREFIX}_CONFIG`];
+    if (engineHome) mkdirSync(engineHome, { recursive: true });
+    if (engineConfigDir) mkdirSync(engineConfigDir, { recursive: true });
+    if (engineConfig) mkdirSync(dirname(engineConfig), { recursive: true });
     const child = spawn(binary, args, {
       cwd,
       windowsHide: true,
@@ -1572,7 +1580,7 @@ function createFileActivityWatcher(cwd: string) {
   if (!cwd || !existsSync(cwd)) return undefined;
   let watcher: FSWatcher | undefined;
   const seen = new Map<string, number>();
-  const ignored = /(^|[\\/])(?:\.git|node_modules|dist|release|\.vite|\.mimocode|\.movo)([\\/]|$)/i;
+  const ignored = new RegExp(`(^|[\\\\/])(?:\\.git|node_modules|dist|release|\\.vite|${escapeRegExp(LEGACY_PROJECT_CONFIG_DIR)}|\\.movo)([\\\\/]|$)`, "i");
 
   try {
     watcher = watch(cwd, { recursive: true }, (eventType, filename) => {

@@ -1,7 +1,7 @@
 {
   "name": "movo",
   "version": "0.1.0",
-  "description": "Movo desktop AI studio for Pinoox and MiMo Code.",
+  "description": "Movo desktop AI studio for Pinoox.",
   "main": "dist-electron/main.js",
   "type": "module",
   "author": {

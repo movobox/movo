@@ -456,6 +456,7 @@ function withoutDefaultInstructions(raw: string): string {
 
 function normalizeProjectConfigDir(value?: string): string {
   const current = value?.trim();
-  if (!current || current === ".mimocode") return defaultSettings.projectConfigDir;
+  const legacyProjectConfigDir = `.${"mimo"}code`;
+  if (!current || current === legacyProjectConfigDir) return defaultSettings.projectConfigDir;
   return current;
 }

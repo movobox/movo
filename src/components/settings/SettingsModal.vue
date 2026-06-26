@@ -67,7 +67,7 @@ function setLanguageFromSelect(event: Event) {
                 <span>{{ t("theme") }}</span>
                 <select v-model="studio.appSettings.theme">
                   <option value="dark">Dark</option>
-                  <option value="mimocode">Movo</option>
+                  <option value="movo">Movo</option>
                 </select>
               </label>
 
@@ -205,7 +205,7 @@ function setLanguageFromSelect(event: Event) {
               <label class="field">
                 <span>Project config directory</span>
                 <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".movo" spellcheck="false" />
-                <small>Default is <code>.movo</code>. Movo writes <code>movo.json</code> there and passes it to the MiMo Code engine with <code>MIMOCODE_CONFIG</code>.</small>
+                <small>Default is <code>.movo</code>. Movo writes <code>movo.json</code> there and uses that file for project configuration.</small>
               </label>
               <label class="field">
                 <span>MCP overrides</span>
