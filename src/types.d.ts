@@ -161,6 +161,7 @@ declare global {
       saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
       pickFiles: () => Promise<string[]>;
+      getPathForFile: (file: File) => string;
       inspectFile: (filePath: string) => Promise<FileInspectResult>;
       listProjectFiles: (folder: string) => Promise<{ ok: boolean; files: ProjectFile[]; error?: string }>;
       searchFiles: (payload: { fileName: string; projectFolder: string }) => Promise<{ found: boolean; path: string }>;

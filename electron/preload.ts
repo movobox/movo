@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("studio", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("studio", {
   saveUiState: (ui: unknown) => ipcRenderer.invoke("ui:save", ui),
   pickFolder: () => ipcRenderer.invoke("folder:pick"),
   pickFiles: () => ipcRenderer.invoke("file:pick"),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   inspectFile: (filePath: string) => ipcRenderer.invoke("file:inspect", filePath),
   listProjectFiles: (folder: string) => ipcRenderer.invoke("project:files", folder),
   searchFiles: (payload: { fileName: string; projectFolder: string }) => ipcRenderer.invoke("file:search", payload),

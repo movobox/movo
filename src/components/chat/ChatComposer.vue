@@ -24,7 +24,7 @@ function onDrop(e: DragEvent) {
   const files = e.dataTransfer?.files;
   if (!files) return;
   for (const file of files) {
-    const path = (file as any).path || file.name;
+    const path = window.studio.getPathForFile?.(file) || (file as any).path || file.name;
     if (path && typeof path === "string") void attachPath(path);
   }
 }
@@ -336,7 +336,7 @@ function formatSize(bytes: number) {
         </div>
         <div class="attachment-meta">
           <strong>{{ attachment.name }}</strong>
-          <span>{{ attachment.mime || attachment.kind }} · {{ formatSize(attachment.size) }}</span>
+          <span>{{ attachment.mime || attachment.kind }} - {{ formatSize(attachment.size) }}</span>
         </div>
         <button type="button" :title="t('deleteChat')" @click="studio.removeAttachment(attachment.id)">
           <X :size="12" />

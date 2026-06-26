@@ -128,7 +128,7 @@ export const useStudioStore = defineStore("studio", () => {
   });
   const draftDir = computed(() => lineDir(activeDraft.value) || "ltr");
   const messageQueue = computed<QueuedMessage[]>(() => activeChat.value?.queuedMessages || []);
-  const canRun = computed(() => Boolean(activeChat.value?.folder && activeDraft.value.trim()));
+  const canRun = computed(() => Boolean(activeChat.value?.folder && (activeDraft.value.trim() || draftAttachments.value.length)));
   const selectedContextFiles = computed(() => extractMentionedFiles(activeDraft.value, projectFiles.value));
   const fileSuggestions = computed(() => {
     const query = filePickerQuery.value.trim().toLowerCase();
@@ -351,12 +351,13 @@ export const useStudioStore = defineStore("studio", () => {
   async function runPrompt() {
     const chat = activeChat.value;
     const text = activeDraft.value.trim();
-    if (!chat || !canRun.value || !text) return;
+    if (!chat || !canRun.value) return;
+    const requestText = text || "Use the attached file(s) as context.";
 
-    if (await handleLocalCommand(text)) return;
+    if (text && await handleLocalCommand(text)) return;
 
-    const contextFiles = extractMentionedFiles(text, projectFiles.value);
-    const mentions = Array.from(text.matchAll(/@([^\s`"'<>]+)/g)).map((m) => m[1]);
+    const contextFiles = extractMentionedFiles(requestText, projectFiles.value);
+    const mentions = Array.from(requestText.matchAll(/@([^\s`"'<>]+)/g)).map((m) => m[1]);
     const unresolvedMentions = mentions.filter((m) => !contextFiles.some((f) => f === m || f.endsWith("/" + m) || f.endsWith("\\" + m)));
     const resolvedFromFs: string[] = [];
     const projectFolder = chat.folder || "";
@@ -370,8 +371,8 @@ export const useStudioStore = defineStore("studio", () => {
     const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs, ...attachedFiles])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
     droppedFiles.value = [];
     draftAttachments.value = [];
-    chat.messages.push(makeMessage("user", text));
-    if (chat.messages.length === 1) chat.title = text.slice(0, 56);
+    chat.messages.push(makeMessage("user", requestText));
+    if (chat.messages.length === 1) chat.title = requestText.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
     const runStartedAt = Date.now();
@@ -380,7 +381,7 @@ export const useStudioStore = defineStore("studio", () => {
     runState.activities = [{
       text: "Understanding request",
       detail: [
-        `Request:\n${text}`,
+        `Request:\n${requestText}`,
         allExtraFiles.length ? `Context and attached files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
       ].filter(Boolean).join("\n")
     }, {
@@ -396,7 +397,7 @@ export const useStudioStore = defineStore("studio", () => {
       await persistUiState();
       const payload = {
         chat: clone(chat),
-        message: buildPromptWithCommandContext(text),
+        message: buildPromptWithCommandContext(requestText),
         appSettings: clone(appSettings.value),
         extraFiles: allExtraFiles
       };
