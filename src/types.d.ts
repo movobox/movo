@@ -13,6 +13,16 @@ export type QueuedMessage = {
   text: string;
 };
 
+export type ChatAttachment = {
+  id: string;
+  path: string;
+  name: string;
+  kind: "image" | "binary";
+  mime: string;
+  size: number;
+  previewUrl?: string;
+};
+
 export type Chat = {
   id: string;
   title: string;
@@ -105,6 +115,21 @@ export type ProjectFile = {
   name: string;
 };
 
+export type FileInspectResult = {
+  ok: boolean;
+  path: string;
+  name: string;
+  size: number;
+  ext: string;
+  mime: string;
+  isImage: boolean;
+  isBinary: boolean;
+  isCode: boolean;
+  mentionable: boolean;
+  previewUrl?: string;
+  error?: string;
+};
+
 export type ProjectChanges = {
   files: { path: string; status: string }[];
   diff: string;
@@ -136,6 +161,7 @@ declare global {
       saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
       pickFiles: () => Promise<string[]>;
+      inspectFile: (filePath: string) => Promise<FileInspectResult>;
       listProjectFiles: (folder: string) => Promise<{ ok: boolean; files: ProjectFile[]; error?: string }>;
       searchFiles: (payload: { fileName: string; projectFolder: string }) => Promise<{ found: boolean; path: string }>;
       runShellCommand: (payload: { command: string; cwd?: string }) => Promise<{ ok: boolean; code: number; output: string }>;

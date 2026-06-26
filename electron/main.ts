@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "ele
 import type { MenuItemConstructorOptions } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, watch, FSWatcher } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
 import type { IPty } from "node-pty";
@@ -653,6 +653,8 @@ ipcMain.handle("file:pick", async () => {
   }
 });
 
+ipcMain.handle("file:inspect", (_event, filePath: string) => inspectAttachmentFile(filePath));
+
 ipcMain.handle("project:files", async (_event, folder: string) => {
   if (!folder || !existsSync(folder)) return { ok: false, files: [], error: "Project folder is missing." };
   try {
@@ -1059,6 +1061,67 @@ function stripAttachedFileMentions(message: string, files: string[], projectFold
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+const imageMimeByExt: Record<string, string> = {
+  ".apng": "image/apng",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp"
+};
+
+const codeOrTextExts = new Set([
+  ".astro", ".bat", ".c", ".cfg", ".cmd", ".conf", ".cpp", ".cs", ".css", ".csv", ".cts", ".cjs",
+  ".dart", ".env", ".go", ".h", ".hpp", ".htm", ".html", ".ini", ".java", ".js", ".json", ".jsx",
+  ".kt", ".less", ".log", ".lua", ".md", ".mdx", ".mjs", ".mts", ".php", ".pl", ".ps1", ".py",
+  ".rb", ".rs", ".sass", ".scss", ".sh", ".sql", ".svelte", ".swift", ".toml", ".ts", ".tsx",
+  ".txt", ".vue", ".xml", ".yaml", ".yml"
+]);
+
+const codeOrTextNames = new Set([
+  ".dockerignore", ".editorconfig", ".env", ".env.example", ".gitattributes", ".gitignore", ".npmrc",
+  "Dockerfile", "Makefile", "Procfile", "LICENSE", "README"
+]);
+
+function inspectAttachmentFile(filePath: string) {
+  try {
+    const clean = String(filePath || "").trim();
+    if (!clean || !existsSync(clean)) return { ok: false, path: clean, name: basename(clean), size: 0, ext: "", mime: "", isImage: false, isBinary: true, isCode: false, mentionable: false, error: "File not found." };
+    const stat = statSync(clean);
+    if (!stat.isFile()) return { ok: false, path: clean, name: basename(clean), size: stat.size, ext: "", mime: "", isImage: false, isBinary: true, isCode: false, mentionable: false, error: "Not a file." };
+    const ext = extname(clean).toLowerCase();
+    const baseName = basename(clean);
+    const mime = imageMimeByExt[ext] || (codeOrTextExts.has(ext) ? "text/plain" : "application/octet-stream");
+    const isImage = Boolean(imageMimeByExt[ext]);
+    const head = readFileSync(clean).subarray(0, Math.min(stat.size, 8192));
+    const hasNullByte = head.includes(0);
+    const isKnownCodeName = codeOrTextNames.has(baseName) || codeOrTextNames.has(baseName.split(".").slice(0, 2).join("."));
+    const isCode = !isImage && (codeOrTextExts.has(ext) || isKnownCodeName) && !hasNullByte;
+    const isBinary = isImage || hasNullByte || !isCode;
+    const result: any = {
+      ok: true,
+      path: clean,
+      name: basename(clean),
+      size: stat.size,
+      ext,
+      mime,
+      isImage,
+      isBinary,
+      isCode,
+      mentionable: isCode && stat.size <= 2_000_000
+    };
+    if (isImage && stat.size <= 3_000_000) {
+      result.previewUrl = `data:${mime};base64,${readFileSync(clean).toString("base64")}`;
+    }
+    return result;
+  } catch (e) {
+    return { ok: false, path: String(filePath || ""), name: basename(String(filePath || "")), size: 0, ext: "", mime: "", isImage: false, isBinary: true, isCode: false, mentionable: false, error: String(e) };
+  }
 }
 
 function scanProjectFiles(folder: string) {

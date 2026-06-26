@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, FileJson, GitFork, Paperclip, Pencil, Play, Square, Trash2, Upload } from "@lucide/vue";
+import { ChevronDown, File, FileJson, GitFork, ImageIcon, Paperclip, Pencil, Play, Square, Trash2, Upload, X } from "@lucide/vue";
 import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
@@ -25,7 +25,7 @@ function onDrop(e: DragEvent) {
   if (!files) return;
   for (const file of files) {
     const path = (file as any).path || file.name;
-    if (path && typeof path === "string") insertMentionAtCursor(path);
+    if (path && typeof path === "string") void attachPath(path);
   }
 }
 async function attachFiles() {
@@ -33,7 +33,7 @@ async function attachFiles() {
     const files = await window.studio.pickFiles();
     if (!files || !Array.isArray(files)) return;
     for (const f of files) {
-      if (f && typeof f === "string") insertMentionAtCursor(f);
+      if (f && typeof f === "string") await attachPath(f);
     }
   } catch (e) {
     console.error("[composer] attachFiles error:", e);
@@ -46,6 +46,19 @@ function sendFromButton() {
     return;
   }
   void studio.runPrompt();
+}
+
+async function attachPath(path: string) {
+  const clean = path.trim();
+  if (!clean) return;
+  try {
+    const info = await window.studio.inspectFile(resolveInputPath(clean));
+    if (info.ok && info.mentionable) {
+      insertMentionAtCursor(info.path);
+      return;
+    }
+  } catch {}
+  await studio.attachFile(clean);
 }
 
 function insertMentionAtCursor(path: string) {
@@ -77,6 +90,12 @@ function insertMentionAtCursor(path: string) {
     input?.setSelectionRange(nextCursor, nextCursor);
     syncMirrorScroll();
   });
+}
+
+function resolveInputPath(path: string) {
+  if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\")) return path;
+  if (!studio.projectRoot) return path;
+  return `${studio.projectRoot.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`;
 }
 
 const highlightedDraft = computed(() => {
@@ -269,6 +288,12 @@ function resolveMentionPath(token: string) {
   const project = studio.projectFiles.find((file) => file.path === token || file.name === token);
   return project?.path || token;
 }
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 </script>
 
 <template>
@@ -294,6 +319,28 @@ function resolveMentionPath(token: string) {
             <Trash2 :size="11" />
           </button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="studio.draftAttachments.length" class="attachment-strip">
+      <div
+        v-for="attachment in studio.draftAttachments"
+        :key="attachment.id"
+        class="attachment-card"
+        :title="attachment.path"
+      >
+        <img v-if="attachment.kind === 'image' && attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
+        <div v-else class="attachment-file-icon">
+          <ImageIcon v-if="attachment.kind === 'image'" :size="18" />
+          <File v-else :size="18" />
+        </div>
+        <div class="attachment-meta">
+          <strong>{{ attachment.name }}</strong>
+          <span>{{ attachment.mime || attachment.kind }} · {{ formatSize(attachment.size) }}</span>
+        </div>
+        <button type="button" :title="t('deleteChat')" @click="studio.removeAttachment(attachment.id)">
+          <X :size="12" />
+        </button>
       </div>
     </div>
 
@@ -335,7 +382,7 @@ function resolveMentionPath(token: string) {
         v-for="file in studio.fileSuggestions"
         :key="file.path"
         type="button"
-        @click="insertMentionAtCursor(file.path)"
+        @click="attachPath(file.path)"
       >
         <span>{{ file.name }}</span>
         <small>{{ file.path }}</small>

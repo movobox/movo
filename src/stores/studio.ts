@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import pkg from "../../package.json";
 import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
-import type { AppSettings, Chat, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
+import type { AppSettings, Chat, ChatAttachment, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
 import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime, uid } from "../utils/chat";
 import { useLanguageStore } from "./language";
 
@@ -53,7 +53,8 @@ export const useStudioStore = defineStore("studio", () => {
   const messagesEl = ref<HTMLElement | null>(null);
   const isPinnedToBottom = ref(true);
   const showScrollToBottom = ref(false);
-  const droppedFiles = ref<string[]>([]);
+  const droppedFileScopes = ref<Record<string, string[]>>({});
+  const attachmentScopes = ref<Record<string, ChatAttachment[]>>({});
 
   let disconnectTimer: ReturnType<typeof setInterval> | null = null;
   let saveChatsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -69,6 +70,7 @@ export const useStudioStore = defineStore("studio", () => {
   const activeTitle = computed(() => activeChat.value?.title || translate("untitled"));
   const currentModel = computed(() => appSettings.value.model || "MiMo Auto");
   const terminalScopeKey = computed(() => activeChat.value ? `chat:${activeChat.value.id}` : "default");
+  const attachmentScopeKey = computed(() => activeChat.value ? `chat:${activeChat.value.id}` : "default");
   function currentTerminalScope() {
     const key = terminalScopeKey.value;
     if (!terminalScopes.value[key]) terminalScopes.value[key] = { sessions: [], activeId: "" };
@@ -78,6 +80,24 @@ export const useStudioStore = defineStore("studio", () => {
     return Object.values(terminalScopes.value).find((scope) => scope.sessions.some((terminal) => terminal.id === terminalId)) || null;
   }
   const terminalSessions = computed(() => currentTerminalScope().sessions);
+  function currentDraftAttachments() {
+    const key = attachmentScopeKey.value;
+    if (!attachmentScopes.value[key]) attachmentScopes.value[key] = [];
+    return attachmentScopes.value[key];
+  }
+  function currentDroppedFiles() {
+    const key = attachmentScopeKey.value;
+    if (!droppedFileScopes.value[key]) droppedFileScopes.value[key] = [];
+    return droppedFileScopes.value[key];
+  }
+  const droppedFiles = computed({
+    get: () => currentDroppedFiles(),
+    set: (files: string[]) => { droppedFileScopes.value[attachmentScopeKey.value] = files; }
+  });
+  const draftAttachments = computed({
+    get: () => currentDraftAttachments(),
+    set: (attachments: ChatAttachment[]) => { attachmentScopes.value[attachmentScopeKey.value] = attachments; }
+  });
   const activeTerminalId = computed({
     get: () => currentTerminalScope().activeId,
     set: (terminalId: string) => { currentTerminalScope().activeId = terminalId; }
@@ -346,8 +366,10 @@ export const useStudioStore = defineStore("studio", () => {
         if (result.found && result.path) resolvedFromFs.push(result.path);
       } catch {}
     }
-    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
+    const attachedFiles = draftAttachments.value.map((attachment) => attachment.path);
+    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs, ...attachedFiles])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
     droppedFiles.value = [];
+    draftAttachments.value = [];
     chat.messages.push(makeMessage("user", text));
     if (chat.messages.length === 1) chat.title = text.slice(0, 56);
     chat.updatedAt = now();
@@ -359,7 +381,7 @@ export const useStudioStore = defineStore("studio", () => {
       text: "Understanding request",
       detail: [
         `Request:\n${text}`,
-        allExtraFiles.length ? `Context files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
+        allExtraFiles.length ? `Context and attached files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
       ].filter(Boolean).join("\n")
     }, {
       text: "Preparing workspace",
@@ -781,6 +803,40 @@ export const useStudioStore = defineStore("studio", () => {
     filePickerQuery.value = "";
   }
 
+  async function attachFile(path: string) {
+    const clean = path.trim();
+    if (!clean) return;
+    try {
+      const info = await window.studio.inspectFile(resolveAttachmentPath(clean));
+      if (!info.ok) return;
+      if (info.mentionable) {
+        attachMentionFile(info.path);
+        return;
+      }
+      if (draftAttachments.value.some((attachment) => attachment.path === info.path)) return;
+      draftAttachments.value.push({
+        id: uid(),
+        path: info.path,
+        name: info.name,
+        kind: info.isImage ? "image" : "binary",
+        mime: info.mime,
+        size: info.size,
+        previewUrl: info.previewUrl
+      });
+    } catch {}
+  }
+
+  function resolveAttachmentPath(path: string) {
+    if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\")) return path;
+    const root = projectRoot.value;
+    if (!root) return path;
+    return `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`;
+  }
+
+  function removeAttachment(id: string) {
+    draftAttachments.value = draftAttachments.value.filter((attachment) => attachment.id !== id);
+  }
+
   function updateScrollState() {
     const el = messagesEl.value;
     if (!el) return;
@@ -1053,6 +1109,7 @@ export const useStudioStore = defineStore("studio", () => {
     selectedContextFiles,
     fileSuggestions,
     droppedFiles,
+    draftAttachments,
     editingMsgId,
     editingText,
     editingChatId,
@@ -1103,6 +1160,8 @@ export const useStudioStore = defineStore("studio", () => {
     insertContextFile,
     removeContextFile,
     attachMentionFile,
+    attachFile,
+    removeAttachment,
     startEdit,
     cancelEdit,
     saveEdit,
