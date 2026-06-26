@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, watch, FSWatcher } from "node:fs";
@@ -557,6 +557,22 @@ function createWindow() {
   attachContextMenu(mainWindow);
 }
 
+function registerPreviewProtocol() {
+  protocol.registerFileProtocol("movo-file", (request, callback) => {
+    try {
+      const parsed = new URL(request.url);
+      const file = decodeURIComponent(parsed.searchParams.get("path") || "");
+      if (!file || !existsSync(file) || !statSync(file).isFile()) {
+        callback({ error: -6 });
+        return;
+      }
+      callback({ path: file });
+    } catch {
+      callback({ error: -2 });
+    }
+  });
+}
+
 function attachContextMenu(win: BrowserWindow) {
   win.webContents.on("context-menu", (event, params) => {
     const isEditable = params.isEditable;
@@ -603,7 +619,10 @@ function attachContextMenu(win: BrowserWindow) {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  registerPreviewProtocol();
+  createWindow();
+});
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
@@ -648,7 +667,7 @@ ipcMain.handle("file:pick", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ["openFile", "multiSelections"]
     });
-    return result.canceled ? [] : result.filePaths;
+    return result.canceled ? [] : result.filePaths.map((filePath) => inspectAttachmentFile(filePath));
   } catch (e) {
     console.error("[main] file:pick error:", e);
     return [];
@@ -656,6 +675,19 @@ ipcMain.handle("file:pick", async () => {
 });
 
 ipcMain.handle("file:inspect", (_event, filePath: string) => inspectAttachmentFile(filePath));
+
+ipcMain.handle("file:saveDropped", (_event, payload: { name: string; data: ArrayBuffer }) => {
+  try {
+    const name = safeFileName(payload?.name || "attachment");
+    const dir = join(app.getPath("temp"), "movo-attachments");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${Date.now()}-${name}`);
+    writeFileSync(file, Buffer.from(new Uint8Array(payload.data)));
+    return { ok: true, path: file };
+  } catch (e) {
+    return { ok: false, path: "", error: String(e) };
+  }
+});
 
 ipcMain.handle("project:files", async (_event, folder: string) => {
   if (!folder || !existsSync(folder)) return { ok: false, files: [], error: "Project folder is missing." };
@@ -1121,9 +1153,7 @@ function inspectAttachmentFile(filePath: string) {
       isCode,
       mentionable: isCode && stat.size <= 2_000_000
     };
-    if (isImage && stat.size <= 3_000_000) {
-      result.previewUrl = `data:${mime};base64,${readFileSync(clean).toString("base64")}`;
-    }
+    if (isImage) result.previewUrl = `movo-file://preview?path=${encodeURIComponent(clean)}`;
     return result;
   } catch (e) {
     return { ok: false, path: String(filePath || ""), name: basename(String(filePath || "")), size: 0, ext: "", mime: "", isImage: false, isBinary: true, isCode: false, mentionable: false, error: String(e) };

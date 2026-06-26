@@ -1,4 +1,4 @@
-import type { Chat, ChatMessage } from "../types";
+import type { Chat, ChatAttachment, ChatMessage } from "../types";
 
 const RTL_RE = /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u07C0-\u07FF\u08A0-\u08FF\u200F\u202B\u202E\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 const LTR_RE = /[A-Za-z]/;
@@ -25,8 +25,8 @@ export function makeChat(title: string, folder = ""): Chat {
   };
 }
 
-export function makeMessage(role: ChatMessage["role"], text: string): ChatMessage {
-  return { id: uid(), role, text, createdAt: now() };
+export function makeMessage(role: ChatMessage["role"], text: string, attachments: ChatAttachment[] = []): ChatMessage {
+  return { id: uid(), role, text, createdAt: now(), ...(attachments.length ? { attachments } : {}) };
 }
 
 export function normalizeChat(chat: Partial<Chat>, fallbackTitle: string): Chat {
@@ -35,7 +35,10 @@ export function normalizeChat(chat: Partial<Chat>, fallbackTitle: string): Chat 
     id: chat.id || uid(),
     title: chat.title || fallbackTitle,
     folder: chat.folder || "",
-    messages: Array.isArray(chat.messages) ? chat.messages : [],
+    messages: Array.isArray(chat.messages) ? chat.messages.map((message) => ({
+      ...message,
+      attachments: Array.isArray(message.attachments) ? message.attachments : undefined
+    })) : [],
     draft: chat.draft || "",
     queuedMessages: Array.isArray(chat.queuedMessages) ? chat.queuedMessages : [],
     createdAt: chat.createdAt || ts,

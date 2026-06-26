@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("studio", {
   pickFiles: () => ipcRenderer.invoke("file:pick"),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   inspectFile: (filePath: string) => ipcRenderer.invoke("file:inspect", filePath),
+  saveDroppedFile: (payload: { name: string; data: ArrayBuffer }) => ipcRenderer.invoke("file:saveDropped", payload),
   listProjectFiles: (folder: string) => ipcRenderer.invoke("project:files", folder),
   searchFiles: (payload: { fileName: string; projectFolder: string }) => ipcRenderer.invoke("file:search", payload),
   runShellCommand: (payload: unknown) => ipcRenderer.invoke("shell:run", payload),

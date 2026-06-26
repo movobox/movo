@@ -6,6 +6,7 @@ export type ChatMessage = {
   role: Role;
   text: string;
   createdAt: string;
+  attachments?: ChatAttachment[];
 };
 
 export type QueuedMessage = {
@@ -160,9 +161,10 @@ declare global {
       saveChats: (chats: Chat[]) => Promise<{ ok: boolean }>;
       saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
-      pickFiles: () => Promise<string[]>;
-      getPathForFile: (file: File) => string;
-      inspectFile: (filePath: string) => Promise<FileInspectResult>;
+      pickFiles: () => Promise<Array<string | FileInspectResult>>;
+      getPathForFile?: (file: File) => string;
+      inspectFile?: (filePath: string) => Promise<FileInspectResult>;
+      saveDroppedFile?: (payload: { name: string; data: ArrayBuffer }) => Promise<{ ok: boolean; path: string; error?: string }>;
       listProjectFiles: (folder: string) => Promise<{ ok: boolean; files: ProjectFile[]; error?: string }>;
       searchFiles: (payload: { fileName: string; projectFolder: string }) => Promise<{ found: boolean; path: string }>;
       runShellCommand: (payload: { command: string; cwd?: string }) => Promise<{ ok: boolean; code: number; output: string }>;

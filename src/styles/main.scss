@@ -1507,6 +1507,31 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   color: #f4f4f5;
 }
 
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.msg-attachments .attachment-card {
+  grid-template-columns: 54px minmax(0, 1fr);
+  width: min(320px, 100%);
+  min-height: 64px;
+  text-align: left;
+}
+
+.msg-attachments .attachment-card:hover {
+  border-color: #3f3f46;
+  background: #17171b;
+}
+
+.msg-attachments .attachment-card img,
+.msg-attachments .attachment-file-icon {
+  width: 54px;
+  height: 54px;
+}
+
 .composer-input-wrap {
   position: relative;
   min-height: 40px;

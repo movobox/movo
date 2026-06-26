@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ArrowDown, Bot, Copy, FileEdit, FilePlus, FileSearch, FileText, FolderOpen, Pencil, RefreshCcw, RotateCcw, Search, Shield, ShieldCheck, Terminal, X } from "@lucide/vue";
-import { computed } from "vue";
+import { ArrowDown, Bot, Copy, File, FileEdit, FilePlus, FileSearch, FileText, FolderOpen, ImageIcon, Pencil, RefreshCcw, RotateCcw, Search, Shield, ShieldCheck, Terminal, X } from "@lucide/vue";
+import { computed, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 import { highlightCode } from "../../utils/highlight";
@@ -11,6 +11,15 @@ const { t } = useI18n();
 
 const queuedAsMessages = computed(() => {
   return studio.messageQueue.map((q) => ({ id: q.id, text: q.text }));
+});
+
+watchEffect(() => {
+  for (const message of studio.activeChat?.messages || []) {
+    for (const attachment of message.attachments || []) {
+      if (attachment.size > 0 && (attachment.kind !== "image" || attachment.previewUrl)) continue;
+      void enrichAttachment(attachment);
+    }
+  }
 });
 
 function activityIcon(text: string) {
@@ -32,6 +41,27 @@ function isFilePath(detail: string) {
 
 function openInExplorer(filePath: string) {
   void window.studio.openPath(filePath);
+}
+
+async function enrichAttachment(attachment: { path: string; name: string; kind: "image" | "binary"; mime: string; size: number; previewUrl?: string }) {
+  if (!window.studio.inspectFile) return;
+  try {
+    const info = await window.studio.inspectFile(attachment.path);
+    if (!info.ok) return;
+    attachment.path = info.path || attachment.path;
+    attachment.name = info.name || attachment.name;
+    attachment.kind = info.isImage ? "image" : attachment.kind;
+    attachment.mime = info.mime || attachment.mime;
+    attachment.size = info.size || attachment.size;
+    attachment.previewUrl = info.previewUrl || attachment.previewUrl;
+  } catch {}
+}
+
+function formatSize(bytes: number) {
+  if (!bytes) return "Unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function hl(code: string, lang: string) {
@@ -90,6 +120,26 @@ function truncateCode(code: string, maxLines = 40): string {
 
             <template v-else>
               <MessageContent :text="message.text" :base-folder="studio.activeChat?.folder" />
+              <div v-if="message.attachments?.length" class="msg-attachments">
+                <button
+                  v-for="attachment in message.attachments"
+                  :key="attachment.id"
+                  class="attachment-card"
+                  type="button"
+                  :title="attachment.path"
+                  @click="openInExplorer(attachment.path)"
+                >
+                  <img v-if="attachment.kind === 'image' && attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
+                  <div v-else class="attachment-file-icon">
+                    <ImageIcon v-if="attachment.kind === 'image'" :size="18" />
+                    <File v-else :size="18" />
+                  </div>
+                  <div class="attachment-meta">
+                    <strong>{{ attachment.name }}</strong>
+                    <span>{{ attachment.mime || attachment.kind }} - {{ formatSize(attachment.size) }}</span>
+                  </div>
+                </button>
+              </div>
               <div class="msg-actions" :dir="studio.lineDir(message.text) || 'ltr'">
                 <button v-if="message.role === 'user'" class="msg-action-btn" type="button" :title="t('editMsg')" @click="studio.startEdit(message)">
                   <Pencil :size="12" />

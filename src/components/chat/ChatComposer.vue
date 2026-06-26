@@ -24,8 +24,7 @@ function onDrop(e: DragEvent) {
   const files = e.dataTransfer?.files;
   if (!files) return;
   for (const file of files) {
-    const path = window.studio.getPathForFile?.(file) || (file as any).path || file.name;
-    if (path && typeof path === "string") void attachPath(path);
+    void attachDroppedFile(file);
   }
 }
 async function attachFiles() {
@@ -33,7 +32,11 @@ async function attachFiles() {
     const files = await window.studio.pickFiles();
     if (!files || !Array.isArray(files)) return;
     for (const f of files) {
-      if (f && typeof f === "string") await attachPath(f);
+      if (typeof f === "string") {
+        await attachPath(f);
+      } else if (f?.ok) {
+        attachInspectedFile(f);
+      }
     }
   } catch (e) {
     console.error("[composer] attachFiles error:", e);
@@ -51,14 +54,96 @@ function sendFromButton() {
 async function attachPath(path: string) {
   const clean = path.trim();
   if (!clean) return;
+  const resolved = resolveInputPath(clean);
   try {
-    const info = await window.studio.inspectFile(resolveInputPath(clean));
-    if (info.ok && info.mentionable) {
+    const info = await window.studio.inspectFile?.(resolved);
+    if (info?.ok && info.mentionable) {
       insertMentionAtCursor(info.path);
       return;
     }
+    if (info?.ok) {
+      studio.addDraftAttachment({
+        path: info.path,
+        name: info.name,
+        kind: info.isImage ? "image" : "binary",
+        mime: info.mime,
+        size: info.size,
+        previewUrl: info.previewUrl
+      });
+      return;
+    }
   } catch {}
-  await studio.attachFile(clean);
+  if (isCodeLikePath(resolved)) {
+    insertMentionAtCursor(resolved);
+    return;
+  }
+  await studio.attachFile(resolved);
+}
+
+function attachInspectedFile(info: {
+  ok: boolean;
+  path: string;
+  name: string;
+  isImage: boolean;
+  mentionable: boolean;
+  mime: string;
+  size: number;
+  previewUrl?: string;
+}) {
+  if (info.mentionable) {
+    insertMentionAtCursor(info.path);
+    return;
+  }
+  studio.addDraftAttachment({
+    path: info.path,
+    name: info.name,
+    kind: info.isImage ? "image" : "binary",
+    mime: info.mime,
+    size: info.size,
+    previewUrl: info.previewUrl
+  });
+}
+
+async function attachDroppedFile(file: File) {
+  const path = window.studio.getPathForFile?.(file) || (file as any).path || file.name;
+  if (!path || typeof path !== "string") return;
+  const hasRealPath = isAbsolutePath(path);
+  let resolved = hasRealPath ? path : "";
+  if (!resolved && window.studio.saveDroppedFile) {
+    try {
+      const saved = await window.studio.saveDroppedFile({ name: file.name || "attachment", data: await file.arrayBuffer() });
+      if (saved.ok && saved.path) resolved = saved.path;
+    } catch {}
+  }
+  if (!resolved) resolved = resolveInputPath(path);
+  if (isCodeLikePath(resolved)) {
+    insertMentionAtCursor(resolved);
+    return;
+  }
+  let inspected = false;
+  try {
+    const info = await window.studio.inspectFile?.(resolved);
+    if (info?.ok) {
+      inspected = true;
+      studio.addDraftAttachment({
+        path: info.path,
+        name: info.name || file.name,
+        kind: info.isImage || file.type.startsWith("image/") ? "image" : "binary",
+        mime: info.mime || file.type || "application/octet-stream",
+        size: info.size || file.size,
+        previewUrl: info.previewUrl || (file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined)
+      });
+    }
+  } catch {}
+  if (inspected) return;
+  studio.addDraftAttachment({
+    path: resolved,
+    name: file.name || fileName(resolved),
+    kind: file.type.startsWith("image/") || isImageLikePath(resolved) ? "image" : "binary",
+    mime: file.type || (isImageLikePath(resolved) ? "image/*" : "application/octet-stream"),
+    size: file.size,
+    previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : previewUrlForPath(resolved)
+  });
 }
 
 function insertMentionAtCursor(path: string) {
@@ -93,9 +178,13 @@ function insertMentionAtCursor(path: string) {
 }
 
 function resolveInputPath(path: string) {
-  if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\")) return path;
+  if (isAbsolutePath(path)) return path;
   if (!studio.projectRoot) return path;
   return `${studio.projectRoot.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`;
+}
+
+function isAbsolutePath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\");
 }
 
 const highlightedDraft = computed(() => {
@@ -280,6 +369,34 @@ function extractMentions(value: string) {
 
 function fileName(path: string) {
   return path.split(/[/\\]/).filter(Boolean).pop() || path;
+}
+
+const codeLikeExts = new Set([
+  "astro", "bat", "c", "cfg", "cmd", "conf", "cpp", "cs", "css", "csv", "cts", "cjs",
+  "dart", "env", "go", "h", "hpp", "htm", "html", "ini", "java", "js", "json", "jsx",
+  "kt", "less", "log", "lua", "md", "mdx", "mjs", "mts", "php", "pl", "ps1", "py",
+  "rb", "rs", "sass", "scss", "sh", "sql", "svelte", "swift", "toml", "ts", "tsx",
+  "txt", "vue", "xml", "yaml", "yml"
+]);
+const codeLikeNames = new Set([".dockerignore", ".editorconfig", ".env", ".env.example", ".gitattributes", ".gitignore", ".npmrc", "Dockerfile", "Makefile", "Procfile", "LICENSE", "README"]);
+const imageLikeExts = new Set(["apng", "avif", "bmp", "gif", "jpg", "jpeg", "png", "svg", "webp"]);
+
+function isCodeLikePath(path: string) {
+  const name = fileName(path);
+  const index = name.lastIndexOf(".");
+  const ext = index >= 0 ? name.slice(index + 1).toLowerCase() : "";
+  return codeLikeExts.has(ext) || codeLikeNames.has(name);
+}
+
+function isImageLikePath(path: string) {
+  const name = fileName(path);
+  const index = name.lastIndexOf(".");
+  const ext = index >= 0 ? name.slice(index + 1).toLowerCase() : "";
+  return imageLikeExts.has(ext);
+}
+
+function previewUrlForPath(path: string) {
+  return isImageLikePath(path) && isAbsolutePath(path) ? `movo-file://preview?path=${encodeURIComponent(path)}` : undefined;
 }
 
 function resolveMentionPath(token: string) {

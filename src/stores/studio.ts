@@ -367,11 +367,14 @@ export const useStudioStore = defineStore("studio", () => {
         if (result.found && result.path) resolvedFromFs.push(result.path);
       } catch {}
     }
-    const attachedFiles = draftAttachments.value.map((attachment) => attachment.path);
+    await Promise.all(draftAttachments.value.map((attachment) => enrichAttachment(attachment)));
+    const outgoingAttachments = clone(draftAttachments.value);
+    const attachedFiles = outgoingAttachments.map((attachment) => attachment.path);
     const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs, ...attachedFiles])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
+    const promptText = withAttachmentContext(requestText, outgoingAttachments);
     droppedFiles.value = [];
     draftAttachments.value = [];
-    chat.messages.push(makeMessage("user", requestText));
+    chat.messages.push(makeMessage("user", requestText, outgoingAttachments));
     if (chat.messages.length === 1) chat.title = requestText.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
@@ -381,7 +384,7 @@ export const useStudioStore = defineStore("studio", () => {
     runState.activities = [{
       text: "Understanding request",
       detail: [
-        `Request:\n${requestText}`,
+        `Request:\n${promptText}`,
         allExtraFiles.length ? `Context and attached files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
       ].filter(Boolean).join("\n")
     }, {
@@ -397,7 +400,7 @@ export const useStudioStore = defineStore("studio", () => {
       await persistUiState();
       const payload = {
         chat: clone(chat),
-        message: buildPromptWithCommandContext(requestText),
+        message: buildPromptWithCommandContext(promptText),
         appSettings: clone(appSettings.value),
         extraFiles: allExtraFiles
       };
@@ -526,6 +529,20 @@ export const useStudioStore = defineStore("studio", () => {
     const withIdentity = `${identity}\n\n${text}`;
     if (!commandBlocks) return withIdentity;
     return `${withIdentity}\n\nRecent command context:\n${commandBlocks}`;
+  }
+
+  function withAttachmentContext(text: string, attachments: ChatAttachment[]) {
+    if (!attachments.length) return text;
+    const lines = attachments.map((attachment) => {
+      const label = attachment.kind === "image" ? "image" : "file";
+      return `- ${label}: ${attachment.name} (${attachment.path})`;
+    });
+    return [
+      text,
+      "",
+      "Attached files available to inspect:",
+      ...lines
+    ].join("\n");
   }
 
   function buildMovoIdentityInstruction() {
@@ -808,15 +825,20 @@ export const useStudioStore = defineStore("studio", () => {
     const clean = path.trim();
     if (!clean) return;
     try {
-      const info = await window.studio.inspectFile(resolveAttachmentPath(clean));
-      if (!info.ok) return;
+      const info = await window.studio.inspectFile?.(resolveAttachmentPath(clean));
+      if (!info) {
+        attachFallbackFile(clean);
+        return;
+      }
+      if (!info.ok) {
+        attachFallbackFile(clean);
+        return;
+      }
       if (info.mentionable) {
         attachMentionFile(info.path);
         return;
       }
-      if (draftAttachments.value.some((attachment) => attachment.path === info.path)) return;
-      draftAttachments.value.push({
-        id: uid(),
+      addDraftAttachment({
         path: info.path,
         name: info.name,
         kind: info.isImage ? "image" : "binary",
@@ -824,11 +846,30 @@ export const useStudioStore = defineStore("studio", () => {
         size: info.size,
         previewUrl: info.previewUrl
       });
-    } catch {}
+    } catch {
+      attachFallbackFile(clean);
+    }
+  }
+
+  function attachFallbackFile(path: string) {
+    const clean = resolveAttachmentPath(path.trim());
+    if (!clean) return;
+    if (isCodeLikePath(clean)) {
+      attachMentionFile(clean);
+      return;
+    }
+    addDraftAttachment({
+      path: clean,
+      name: fileNameFromPath(clean),
+      kind: isImageLikePath(clean) ? "image" : "binary",
+      mime: isImageLikePath(clean) ? "image/*" : "application/octet-stream",
+      size: 0,
+      previewUrl: isImageLikePath(clean) && isAbsolutePath(clean) ? `movo-file://preview?path=${encodeURIComponent(clean)}` : undefined
+    });
   }
 
   function resolveAttachmentPath(path: string) {
-    if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\")) return path;
+    if (isAbsolutePath(path)) return path;
     const root = projectRoot.value;
     if (!root) return path;
     return `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`;
@@ -836,6 +877,38 @@ export const useStudioStore = defineStore("studio", () => {
 
   function removeAttachment(id: string) {
     draftAttachments.value = draftAttachments.value.filter((attachment) => attachment.id !== id);
+  }
+
+  function addDraftAttachment(attachment: Omit<ChatAttachment, "id"> & { id?: string }) {
+    const cleanPath = attachment.path.trim();
+    if (!cleanPath) return;
+    if (draftAttachments.value.some((item) => item.path === cleanPath)) return;
+    const item = {
+      id: attachment.id || uid(),
+      path: cleanPath,
+      name: attachment.name || fileNameFromPath(cleanPath),
+      kind: attachment.kind,
+      mime: attachment.mime || (attachment.kind === "image" ? "image/*" : "application/octet-stream"),
+      size: Number.isFinite(attachment.size) ? attachment.size : 0,
+      previewUrl: attachment.previewUrl
+    };
+    draftAttachments.value.push(item);
+    void enrichAttachment(item);
+  }
+
+  async function enrichAttachment(attachment: ChatAttachment) {
+    if (!window.studio.inspectFile) return;
+    if (attachment.size > 0 && (attachment.kind !== "image" || attachment.previewUrl)) return;
+    try {
+      const info = await window.studio.inspectFile(attachment.path);
+      if (!info.ok) return;
+      attachment.path = info.path || attachment.path;
+      attachment.name = info.name || attachment.name;
+      attachment.kind = info.isImage ? "image" : attachment.kind;
+      attachment.mime = info.mime || attachment.mime;
+      attachment.size = info.size || attachment.size;
+      attachment.previewUrl = info.previewUrl || attachment.previewUrl;
+    } catch {}
   }
 
   function updateScrollState() {
@@ -1162,6 +1235,7 @@ export const useStudioStore = defineStore("studio", () => {
     removeContextFile,
     attachMentionFile,
     attachFile,
+    addDraftAttachment,
     removeAttachment,
     startEdit,
     cancelEdit,
@@ -1196,6 +1270,36 @@ function extractMentionedFiles(text: string, files: ProjectFile[]) {
 
 function fileNameFromPath(path: string) {
   return path.split(/[/\\]/).filter(Boolean).pop() || path;
+}
+
+const codeLikeExts = new Set([
+  "astro", "bat", "c", "cfg", "cmd", "conf", "cpp", "cs", "css", "csv", "cts", "cjs",
+  "dart", "env", "go", "h", "hpp", "htm", "html", "ini", "java", "js", "json", "jsx",
+  "kt", "less", "log", "lua", "md", "mdx", "mjs", "mts", "php", "pl", "ps1", "py",
+  "rb", "rs", "sass", "scss", "sh", "sql", "svelte", "swift", "toml", "ts", "tsx",
+  "txt", "vue", "xml", "yaml", "yml"
+]);
+
+const codeLikeNames = new Set([".dockerignore", ".editorconfig", ".env", ".env.example", ".gitattributes", ".gitignore", ".npmrc", "Dockerfile", "Makefile", "Procfile", "LICENSE", "README"]);
+const imageLikeExts = new Set(["apng", "avif", "bmp", "gif", "jpg", "jpeg", "png", "svg", "webp"]);
+
+function pathExt(path: string) {
+  const name = fileNameFromPath(path);
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(index + 1).toLowerCase() : "";
+}
+
+function isCodeLikePath(path: string) {
+  const name = fileNameFromPath(path);
+  return codeLikeExts.has(pathExt(path)) || codeLikeNames.has(name);
+}
+
+function isImageLikePath(path: string) {
+  return imageLikeExts.has(pathExt(path));
+}
+
+function isAbsolutePath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\");
 }
 
 function fuzzyFiles(files: ProjectFile[], query: string) {
