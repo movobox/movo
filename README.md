@@ -43,6 +43,7 @@ Movo has its own identity, UI, settings, and workflow layer. Under the hood, it 
 - [Privacy And Workspace Trust](#privacy-and-workspace-trust)
 - [Development](#development)
 - [Release Automation](#release-automation)
+- [Other Projects](#other-projects)
 
 ## Download
 
@@ -74,9 +75,10 @@ Compatible donation options:
 - TON on the TON network.
 - USDT on the TON network.
 
-You can use Tonkeeper or any other wallet that supports the TON network. If the wallet link below does not open from GitHub, copy the address manually.
+You can use Tonkeeper or any other wallet that supports the TON network. If a wallet link does not open from GitHub, copy the address manually.
 
-[Donate with a TON wallet](ton://transfer/UQBQwGiT0DbnWPvxuYa9EVYVVtniyDmzltBiVghOhozz-vJQ)
+- [Donate with Tonkeeper](https://app.tonkeeper.com/transfer/UQBQwGiT0DbnWPvxuYa9EVYVVtniyDmzltBiVghOhozz-vJQ)
+- [Donate with a TON wallet](ton://transfer/UQBQwGiT0DbnWPvxuYa9EVYVVtniyDmzltBiVghOhozz-vJQ)
 
 Please use only the TON network for this address. Do not send ERC20, TRC20, BSC, Polygon, or other network transfers to this wallet address.
 
@@ -262,3 +264,9 @@ Release process:
 3. Create a GitHub Release from that tag.
 4. Publish the release.
 5. Wait for the release workflow to attach installers automatically.
+
+## Other Projects
+
+We are also working on related tools and frameworks around the Pinoox ecosystem:
+
+- [Pinoox](https://github.com/pinoox/pinoox) - an open-source PHP platform and application framework for building modular Pinoox apps.
