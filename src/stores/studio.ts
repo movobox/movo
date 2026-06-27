@@ -41,6 +41,7 @@ export const useStudioStore = defineStore("studio", () => {
     pendingPermissions: PermissionEvent[];
     interruptedRun: InterruptedEvent | null;
     startedAt: number;
+    nonRetryableErrorSeen: boolean;
   };
   const runStates = ref<Record<string, RunState>>({});
   const projectFiles = ref<ProjectFile[]>([]);
@@ -258,7 +259,8 @@ export const useStudioStore = defineStore("studio", () => {
       timeline: [],
       pendingPermissions: [],
       interruptedRun: null,
-      startedAt
+      startedAt,
+      nonRetryableErrorSeen: false
     };
   }
 
@@ -460,16 +462,7 @@ export const useStudioStore = defineStore("studio", () => {
     const runStartedAt = Date.now();
     const runState = makeRunState(runStartedAt);
     runState.isRunning = true;
-    runState.activities = [{
-      text: "Understanding request",
-      detail: [
-        `Request:\n${promptText}`,
-        allExtraFiles.length ? `Context and attached files:\n${allExtraFiles.map((file) => `- ${file}`).join("\n")}` : ""
-      ].filter(Boolean).join("\n")
-    }, {
-      text: "Preparing workspace",
-      detail: "Loading project settings, hidden Movo defaults, and relevant context before the engine starts."
-    }];
+    runState.activities = [];
     runStates.value[chat.id] = runState;
     await nextTick();
     scrollToBottom("smooth");
@@ -748,6 +741,8 @@ export const useStudioStore = defineStore("studio", () => {
   function pushRunActivity(chatId: string, text: string, detail = "", code?: string, codeLang?: string, oldCode?: string, newCode?: string, editFilePath?: string) {
     const clean = text.trim();
     if (!clean) return;
+    if (isIgnorableAgentFallbackText(clean) || isIgnorableAgentFallbackText(detail)) return;
+    if (!isUsefulProjectActivity(clean, detail, { code, oldCode, newCode, editFilePath })) return;
     const runState = ensureRunState(chatId);
     const last = runState.activities[runState.activities.length - 1];
     if (last && last.text === clean && last.detail === detail.trim() && last.code === code) return;
@@ -1190,6 +1185,10 @@ export const useStudioStore = defineStore("studio", () => {
       if (!chatId || !runState?.isRunning) return;
       const isActiveRun = activeChat.value?.id === chatId;
       if (event.type === "activity") {
+        if (isNonRetryableEngineText(event.text) || isNonRetryableEngineText(event.detail || "")) {
+          runState.nonRetryableErrorSeen = true;
+        }
+        if (runState.nonRetryableErrorSeen && isRetryActivity(event.text, event.detail || "")) return;
         pushRunActivity(chatId, event.text, event.detail || "", event.code, event.codeLang, event.oldCode, event.newCode, event.editFilePath);
         if (isActiveRun) void nextTick(() => scrollMessages({ behavior: "smooth" }));
       } else if (event.type === "stdout") {
@@ -1433,6 +1432,8 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
       text: activity.text.trim(),
       detail: activity.detail.trim()
     }))
+    .filter((activity) => !isIgnorableAgentFallbackText(activity.text) && !isIgnorableAgentFallbackText(activity.detail))
+    .filter((activity) => isUsefulProjectActivity(activity.text, activity.detail, activity))
     .filter((activity) => activity.text || activity.detail || activity.code || activity.oldCode || activity.newCode);
   if (!useful.length) return "";
 
@@ -1442,7 +1443,7 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
     `<div class="activity-log-list">`
   ];
   for (const [index, activity] of useful.entries()) {
-    lines.push(`<section class="activity-log-item">`);
+    lines.push(`<section class="activity-log-item${isErrorActivity(activity.text, activity.detail) ? " error" : ""}">`);
     lines.push(`<div class="activity-log-item-head"><span class="activity-log-index">${index + 1}</span><span class="activity-log-title">${escapeHtml(activity.text)}</span></div>`);
     if (activity.detail) lines.push(formatActivityDetail(activity.detail));
     if (activity.editFilePath) lines.push(`<div class="activity-log-file">File: <code>${escapeHtml(activity.editFilePath)}</code></div>`);
@@ -1464,6 +1465,58 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
   lines.push(`</div>`);
   lines.push("</details>");
   return lines.join("\n").trim();
+}
+
+function isIgnorableAgentFallbackText(text: string) {
+  const clean = stripAnsi(text || "");
+  return /agent\s+["“”']?(pinoox|ask|debugger|compose)["“”']?\s+not\s+found/i.test(clean)
+    && /falling back to default agent/i.test(clean);
+}
+
+function isNonRetryableEngineText(text: string) {
+  const clean = stripAnsi(text || "");
+  return /configuration is invalid|invalid configuration|unrecognized key|unknown key|syntaxerror|parse error|failed to parse/i.test(clean)
+    || /^\s*\d+\s*\|/m.test(clean)
+    || /["'][^"']+["']\s*(?:->|=>|\\u2192)/i.test(clean)
+    || /best practices for React hooks/i.test(clean);
+}
+
+function isRetryActivity(text: string, detail: string) {
+  return /^Retrying\.\.\./i.test(stripAnsi(text || ""))
+    || /Connection issue, retrying/i.test(stripAnsi(detail || ""));
+}
+
+function isUsefulProjectActivity(text: string, detail: string, meta: { code?: string; oldCode?: string; newCode?: string; editFilePath?: string }) {
+  const clean = stripAnsi(`${text}\n${detail}`).trim();
+  if (!clean) return false;
+  if (isErrorActivity(text, detail)) return true;
+  if (meta.code || meta.oldCode || meta.newCode || meta.editFilePath) return true;
+  if (isInternalNoiseActivity(text, detail)) return false;
+  return /\b(read|reading|write|writing|edit|editing|patch|file|files|grep|search|find|command|terminal|bash|shell|permission|diff|changes?|created?|deleted?|renamed?|move|moving|mkdir|install|build|test|lint|format)\b/i.test(clean)
+    || /[A-Za-z]:[\\/][^\r\n]+|(?:^|[\s`])\.?[\w.-]+[\\/][\w./-]+/m.test(clean);
+}
+
+function isInternalNoiseActivity(text: string, detail: string) {
+  const clean = stripAnsi(`${text}\n${detail}`).trim();
+  return /^Understanding request$/i.test(text)
+    || /^Preparing workspace$/i.test(text)
+    || /^Starting step$/i.test(text)
+    || /^Step complete$/i.test(text)
+    || /^Processing tool results/i.test(text)
+    || /^Writing final response/i.test(text)
+    || /^Still waiting/i.test(text)
+    || /Performing one time database migration/i.test(clean)
+    || /sqlite-migration:done/i.test(clean)
+    || /Database migration complete/i.test(clean);
+}
+
+function isErrorActivity(text: string, detail: string) {
+  const clean = stripAnsi(`${text}\n${detail}`).trim();
+  return /\berror\b|exception|failed|failure|fatal|configuration is invalid|invalid configuration|connection interrupted|timed out|timeout|permission denied|access denied/i.test(clean);
+}
+
+function stripAnsi(text: string) {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 function formatWorkedDuration(elapsedMs: number) {

@@ -763,6 +763,22 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   border-radius: 8px;
   background: #111116;
 }
+.activity-log-item.error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.14);
+}
+.activity-log-item.error .activity-log-index {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+.activity-log-item.error .activity-log-title {
+  color: #fca5a5;
+}
+.activity-log-item.error .activity-log-detail,
+.activity-log-item.error .activity-log-code {
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fecaca;
+}
 .activity-log-item-head {
   display: flex;
   align-items: center;

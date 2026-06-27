@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, watch, FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, statSync, watch, FSWatcher } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
@@ -1064,11 +1064,23 @@ function projectConfigPath(folder: string) {
 function existingProjectConfigPath(folder: string) {
   const preferred = projectConfigPath(folder);
   if (preferred && existsSync(preferred)) return preferred;
-  const legacyMovoDirFile = join(projectConfigDirPath(folder, defaultAppSettings), LEGACY_CONFIG_FILE);
+  const legacyMovoDirFile = legacyMovoConfigPath(folder);
   if (existsSync(legacyMovoDirFile)) return legacyMovoDirFile;
-  const legacyProjectFile = join(resolve(folder), LEGACY_PROJECT_CONFIG_DIR, LEGACY_CONFIG_FILE);
+  const legacyProjectFile = legacyProjectConfigPath(folder);
   if (existsSync(legacyProjectFile)) return legacyProjectFile;
   return preferred;
+}
+
+function legacyProjectConfigPath(folder: string) {
+  return join(resolve(folder), LEGACY_PROJECT_CONFIG_DIR, LEGACY_CONFIG_FILE);
+}
+
+function legacyProjectConfigDirPath(folder: string) {
+  return join(resolve(folder), LEGACY_PROJECT_CONFIG_DIR);
+}
+
+function legacyMovoConfigPath(folder: string) {
+  return join(projectConfigDirPath(folder, defaultAppSettings), LEGACY_CONFIG_FILE);
 }
 
 function projectConfigPathForSettings(folder: string, appSettings: AppSettings) {
@@ -1100,6 +1112,7 @@ function engineConfigPath() {
 function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
   const trusted = isProjectTrusted(appSettings, projectFolder);
   const config = buildEngineConfig(projectFolder, appSettings, trusted);
+  stripMovoProjectMetadata(config);
   const configPath = engineConfigPath();
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
@@ -1328,8 +1341,14 @@ function buildEngineConfig(folder: string, appSettings: AppSettings, includeProj
   return config;
 }
 
+function stripMovoProjectMetadata(config: Record<string, unknown>) {
+  delete config.movo;
+  delete config.mimocode;
+}
+
 function writeProjectConfig(folder: string, appSettings: AppSettings) {
   if (!isProjectTrusted(appSettings, folder)) return;
+  migrateLegacyProjectConfig(folder);
   const file = projectConfigPathForSettings(folder, appSettings);
   if (!file) return;
   mkdirSync(dirname(file), { recursive: true });
@@ -1340,9 +1359,11 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
     trustedAt: new Date().toISOString()
   };
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
+  cleanupLegacyProjectConfig(folder);
 }
 
 function setProjectTrustMarker(folder: string, trusted: boolean) {
+  migrateLegacyProjectConfig(folder);
   const file = projectConfigPathForSettings(folder, defaultAppSettings);
   if (!file) return;
   mkdirSync(dirname(file), { recursive: true });
@@ -1356,6 +1377,37 @@ function setProjectTrustMarker(folder: string, trusted: boolean) {
     trustedAt: trusted ? new Date().toISOString() : null
   };
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
+  cleanupLegacyProjectConfig(folder);
+}
+
+function migrateLegacyProjectConfig(folder: string) {
+  const preferred = projectConfigPath(folder);
+  if (!preferred) return;
+  const legacyFiles = [legacyMovoConfigPath(folder), legacyProjectConfigPath(folder)].filter((file) => file !== preferred);
+  const legacyConfig = legacyFiles.reduce<Record<string, unknown>>((acc, file) => {
+    if (!existsSync(file)) return acc;
+    try {
+      const parsed = JSON.parse(readFileSync(file, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { ...acc, ...parsed as Record<string, unknown> };
+    } catch {}
+    return acc;
+  }, {});
+  if (!Object.keys(legacyConfig).length || existsSync(preferred)) return;
+  mkdirSync(dirname(preferred), { recursive: true });
+  writeFileSync(preferred, JSON.stringify(legacyConfig, null, 2), "utf8");
+}
+
+function cleanupLegacyProjectConfig(folder: string) {
+  if (!folder || !existsSync(folder)) return;
+  const base = resolve(folder);
+  const legacyDir = legacyProjectConfigDirPath(folder);
+  const legacyMovoFile = legacyMovoConfigPath(folder);
+  for (const target of [legacyMovoFile, legacyDir]) {
+    const resolved = resolve(target);
+    if (resolved !== base && !resolved.startsWith(base + sep)) continue;
+    if (!existsSync(resolved)) continue;
+    try { rmSync(resolved, { recursive: true, force: true }); } catch {}
+  }
 }
 
 function mergeMcpConfig(config: Record<string, unknown>, raw: string, folder: string) {
@@ -1498,10 +1550,23 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
 
   function isNetworkError(stderr: string, code: number): boolean {
     const clean = stderr.replace(/\u001b\[[0-9;]*m/g, "");
-    if (/file not found|no such file|enoent/i.test(clean)) return false;
-    if (code !== 0 && code !== -1) return true;
+    if (isNonRetryableEngineError(clean)) return false;
     const lower = clean.toLowerCase();
-    return NETWORK_ERRORS.some((e) => lower.includes(e.toLowerCase()));
+    if (NETWORK_ERRORS.some((e) => lower.includes(e.toLowerCase()))) return true;
+    return code === -1 && !clean.trim();
+  }
+
+  function isNonRetryableEngineError(text: string): boolean {
+    if (/^\s*\d+\s*\|/m.test(text)
+      || /["'][^"']+["']\s*(?:->|=>|\\u2192)/i.test(text)
+      || /best practices for React hooks/i.test(text)) return true;
+    return /file not found|no such file|enoent/i.test(text)
+      || /configuration is invalid|invalid configuration|config(?:uration)? .*invalid/i.test(text)
+      || /unrecognized key|unknown key|unknown option|invalid option/i.test(text)
+      || /syntaxerror|parse error|failed to parse|json|yaml|toml/i.test(text)
+      || /expected .*?(?:but|got)|line\s+\d+|column\s+\d+/i.test(text)
+      || /^\s*\d+\s*\|/m.test(text)
+      || /["“”][^"“”]+["“”]\s*→/u.test(text);
   }
 
   return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
@@ -1568,6 +1633,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     clearIdleTimer();
     clearHeartbeat();
     fileActivityWatcher?.close();
+    cleanupLegacyProjectConfig(cwd);
     flushLineBuffer();
     if (shouldKill && !child.killed) child.kill();
     const currentRun = activeRuns.get(runId);
@@ -1692,7 +1758,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
           }
         } catch {
           lastEventTime = Date.now();
-          if (!line.includes("<system-reminder>") && !line.includes("</system-reminder>")) {
+          if (!line.includes("<system-reminder>") && !line.includes("</system-reminder>") && !isIgnorableEngineNoise(line)) {
             if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stdout", text: line + "\n" });
             fullText += line + "\n";
           }
@@ -1703,6 +1769,16 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
 
     child.stderr.on("data", (d: Buffer) => {
       const t = d.toString();
+      if (isIgnorableEngineNoise(t)) {
+        console.log("[mimo] ignored engine noise:", stripAnsi(t).trim());
+        markActivity();
+        return;
+      }
+      if (isIgnorableAgentFallbackWarning(t, args)) {
+        console.log("[mimo] ignored stderr:", stripAnsi(t).trim());
+        markActivity();
+        return;
+      }
       stderrText += t;
       lastEventTime = Date.now();
       console.log("[mimo] stderr:", t);
@@ -2161,10 +2237,39 @@ function summarizeActivityEventLegacy(event: any): { text: string; detail: strin
 }
 
 function summarizeStderrActivity(text: string): string {
-  const clean = text.trim();
+  const clean = stripAnsi(text).trim();
   if (!clean) return "";
   const firstLine = clean.split(/\r?\n/).find(Boolean) || clean;
   return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
+}
+
+function stripAnsi(text: string) {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+function isIgnorableEngineNoise(text: string) {
+  const clean = stripAnsi(text).trim();
+  if (!clean) return false;
+  return /Performing one time database migration/i.test(clean)
+    || /^sqlite-migration:(?:done|\d+)$/im.test(clean)
+    || /Database migration complete/i.test(clean);
+}
+
+function selectedAgentFromArgs(args: string[]) {
+  const index = args.findIndex((arg) => arg === "--agent");
+  return index >= 0 ? args[index + 1] || "" : "";
+}
+
+function isIgnorableAgentFallbackWarning(text: string, args: string[]) {
+  const clean = stripAnsi(text);
+  const agent = selectedAgentFromArgs(args);
+  const knownAgents = ["pinoox", "ask", "debugger", "compose"];
+  if (knownAgents.some((name) => new RegExp(`agent\\s+["“”']?${name}["“”']?\\s+not\\s+found`, "i").test(clean))
+    && /falling back to default agent/i.test(clean)) return true;
+  if (!agent) return false;
+  if (!["pinoox", "ask", "debugger", "compose"].includes(agent)) return false;
+  return new RegExp(`agent\\s+["“”']?${agent}["“”']?\\s+not\\s+found`, "i").test(clean)
+    && /falling back to default agent/i.test(clean);
 }
 
 function normalizeToolName(value: unknown) {
