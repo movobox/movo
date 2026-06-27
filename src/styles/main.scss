@@ -2584,6 +2584,32 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
   font-size: 11px;
 }
+.engine-server-card .field {
+  margin-bottom: 0;
+}
+.segmented {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid #27272f;
+  border-radius: 8px;
+  background: #0b0b0d;
+}
+.segmented button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #8b8b94;
+  font-size: 12px;
+  font-weight: 600;
+}
+.segmented button.active {
+  background: #24243a;
+  color: #c7d2fe;
+}
+.segmented button:hover {
+  color: #e4e4e7;
+}
 .secondary-btn {
   justify-self: start;
   height: 30px;

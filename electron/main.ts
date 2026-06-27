@@ -23,6 +23,7 @@ type AppSettings = {
   memory: { enabled: boolean };
   compaction: { auto: boolean; prune: boolean; reserved: number };
   watcher: { enabled: boolean };
+  engineServer: { mode: "local" | "attach"; attachUrl: string; port: number | null };
   share: string;
   autoupdate: boolean | "notify";
   experimental: { maxMode: boolean };
@@ -399,6 +400,7 @@ const defaultAppSettings: AppSettings = {
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true }, memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 }, watcher: { enabled: true },
+  engineServer: { mode: "local", attachUrl: "", port: null },
   share: "manual", autoupdate: true,
   experimental: { maxMode: false }, mcpServersJson: "{}", agentsJson: "{}", commandsJson: "{}",
   skillsJson: "{}", toolJson: "{}", lspJson: "{}", formatterJson: "{}", keybindingsJson: "{}",
@@ -453,6 +455,7 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
     memory: { ...defaultAppSettings.memory, ...(value.memory || {}) },
     compaction: { ...defaultAppSettings.compaction, ...(value.compaction || {}) },
     watcher: { ...defaultAppSettings.watcher, ...(value.watcher || {}) },
+    engineServer: normalizeEngineServer(value.engineServer),
     experimental: { ...defaultAppSettings.experimental, ...(value.experimental || {}) }
   };
   settings.mcpServersJson = withoutDefaultObject(value.mcpServersJson || defaultAppSettings.mcpServersJson, defaultPinooxMcpServers);
@@ -470,6 +473,16 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.trustWorkspace = false;
   settings.trustedWorkspaces = normalizeTrustedWorkspaces(value.trustedWorkspaces);
   return settings;
+}
+
+function normalizeEngineServer(value: Partial<AppSettings["engineServer"]> | undefined): AppSettings["engineServer"] {
+  const mode = value?.mode === "attach" ? "attach" : "local";
+  const portValue = typeof value?.port === "number" && Number.isFinite(value.port) ? Math.round(value.port) : null;
+  return {
+    mode,
+    attachUrl: typeof value?.attachUrl === "string" ? value.attachUrl.trim() : "",
+    port: portValue && portValue > 0 && portValue <= 65535 ? portValue : null
+  };
 }
 
 function normalizeTrustedWorkspaces(value?: Record<string, boolean>) {
@@ -901,6 +914,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; turn
     const s = { ...defaultAppSettings, ...payload.appSettings };
     if (s.agent) args.push("--agent", s.agent);
     if (s.model) args.push("--model", s.model);
+    appendEngineServerArgs(args, s.engineServer);
     const hasAssistantReply = payload.chat.messages?.some(m => m.role === "assistant" && m.text.trim());
     if (hasAssistantReply) args.push("--continue");
     if (payload.chat.title) args.push("--title", payload.chat.title);
@@ -932,6 +946,15 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; turn
     return { ok: false, code: -1, output: String(e) };
   }
 });
+
+function appendEngineServerArgs(args: string[], server: AppSettings["engineServer"]) {
+  const normalized = normalizeEngineServer(server);
+  if (normalized.mode === "attach") {
+    if (normalized.attachUrl) args.push("--attach", normalized.attachUrl);
+    return;
+  }
+  if (normalized.port) args.push("--port", String(normalized.port));
+}
 
 ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false, 0, "", 0, buildMimoEnvironment(process.cwd(), defaultAppSettings)));
 

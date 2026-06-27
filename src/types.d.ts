@@ -56,6 +56,7 @@ export type AppSettings = {
   memory: { enabled: boolean };
   compaction: { auto: boolean; prune: boolean; reserved: number };
   watcher: { enabled: boolean };
+  engineServer: { mode: "local" | "attach"; attachUrl: string; port: number | null };
   share: string;
   autoupdate: boolean | "notify";
   experimental: { maxMode: boolean };

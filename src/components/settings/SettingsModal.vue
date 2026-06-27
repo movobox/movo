@@ -194,6 +194,37 @@ function setLanguageFromSelect(event: Event) {
             </section>
 
             <section v-else-if="activeSection === 'network'" class="settings-section">
+              <div class="support-card engine-server-card">
+                <strong>Engine server</strong>
+                <span>Connect Movo to a running MiMo Code server or pin the local server to a stable port.</span>
+                <div class="segmented">
+                  <button
+                    type="button"
+                    :class="{ active: studio.appSettings.engineServer.mode === 'local' }"
+                    @click="studio.appSettings.engineServer.mode = 'local'"
+                  >
+                    Local
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: studio.appSettings.engineServer.mode === 'attach' }"
+                    @click="studio.appSettings.engineServer.mode = 'attach'"
+                  >
+                    Attach
+                  </button>
+                </div>
+                <label v-if="studio.appSettings.engineServer.mode === 'attach'" class="field">
+                  <span>Attach URL</span>
+                  <input v-model.trim="studio.appSettings.engineServer.attachUrl" type="url" placeholder="http://localhost:4096" spellcheck="false" />
+                  <small>Uses <code>--attach</code> to connect each request to an already running MiMo Code server.</small>
+                </label>
+                <label v-else class="field">
+                  <span>Local server port</span>
+                  <input v-model.number="studio.appSettings.engineServer.port" type="number" min="1" max="65535" placeholder="Random" />
+                  <small>Uses <code>--port</code>. Leave empty to let the engine choose a random port.</small>
+                </label>
+              </div>
+
               <label class="field">
                 <span>Share</span>
                 <select v-model="studio.appSettings.share">

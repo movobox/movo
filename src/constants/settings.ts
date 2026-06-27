@@ -346,6 +346,7 @@ export const defaultSettings: AppSettings = {
   memory: { enabled: true },
   compaction: { auto: true, prune: true, reserved: 10000 },
   watcher: { enabled: true },
+  engineServer: { mode: "local", attachUrl: "", port: null },
   share: "manual",
   autoupdate: true,
   experimental: { maxMode: false },
@@ -373,6 +374,7 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
     memory: { ...defaultSettings.memory, ...(value.memory || {}) },
     compaction: { ...defaultSettings.compaction, ...(value.compaction || {}) },
     watcher: { ...defaultSettings.watcher, ...(value.watcher || {}) },
+    engineServer: normalizeEngineServer(value.engineServer),
     experimental: { ...defaultSettings.experimental, ...(value.experimental || {}) },
     mcpServersJson: withoutDefaultObject(value.mcpServersJson || defaultSettings.mcpServersJson, defaultPinooxMcpServers),
     agentsJson: withoutDefaultObject(normalizeSelectableAgentModes(value.agentsJson || defaultSettings.agentsJson), defaultAgents),
@@ -423,6 +425,16 @@ function withDefaultObject(raw: string, defaults: Record<string, unknown>): stri
   } catch {
     return raw || JSON.stringify(defaults, null, 2);
   }
+}
+
+function normalizeEngineServer(value: Partial<AppSettings["engineServer"]> | undefined): AppSettings["engineServer"] {
+  const mode = value?.mode === "attach" ? "attach" : "local";
+  const portValue = typeof value?.port === "number" && Number.isFinite(value.port) ? Math.round(value.port) : null;
+  return {
+    mode,
+    attachUrl: typeof value?.attachUrl === "string" ? value.attachUrl.trim() : "",
+    port: portValue && portValue > 0 && portValue <= 65535 ? portValue : null
+  };
 }
 
 function normalizeTrustedWorkspaces(value?: Record<string, boolean>): Record<string, boolean> {
