@@ -36,6 +36,15 @@ export type Chat = {
   updatedAt: string;
 };
 
+export type CopiedMessageRef = {
+  id: string;
+  role: Role;
+  text: string;
+  chatId: string;
+  chatTitle: string;
+  copiedAt: string;
+};
+
 export type AppSettings = {
   language: Language;
   model: string;
@@ -79,6 +88,7 @@ export type StudioSettings = {
   ui?: {
     activeChatId?: string;
     draftChat?: Chat | null;
+    copiedMessageRefs?: Record<string, CopiedMessageRef>;
   };
 };
 
@@ -177,7 +187,7 @@ declare global {
       getSettings: () => Promise<StudioSettings>;
       saveSettings: (settings: AppSettings) => Promise<{ ok: boolean }>;
       saveChats: (chats: Chat[]) => Promise<{ ok: boolean }>;
-      saveUiState: (ui: { activeChatId: string; draftChat: Chat | null }) => Promise<{ ok: boolean }>;
+      saveUiState: (ui: { activeChatId: string; draftChat: Chat | null; copiedMessageRefs?: Record<string, CopiedMessageRef> }) => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string>;
       pickFiles: () => Promise<Array<string | FileInspectResult>>;
       getPathForFile?: (file: File) => string;

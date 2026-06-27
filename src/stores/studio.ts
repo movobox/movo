@@ -3,13 +3,14 @@ import { computed, nextTick, ref, watch } from "vue";
 import pkg from "../../package.json";
 import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
-import type { AppSettings, Chat, ChatAttachment, ChatMessage, DevServerSession, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
+import type { AppSettings, Chat, ChatAttachment, ChatMessage, CopiedMessageRef, DevServerSession, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, Role, TerminalExitEvent, TerminalSession } from "../types";
 import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime, uid } from "../utils/chat";
 import { highlightCode } from "../utils/highlight";
 import { useLanguageStore } from "./language";
 
 type CliStatus = { installed: boolean; version: string; checked: boolean };
 type RunActivity = { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
+type MovoMessageReference = { id: string; role: Role; text: string; chatId: string; chatTitle: string };
 const APP_NAME = "Movo";
 const APP_VERSION = pkg.version || "0.1.0";
 
@@ -61,6 +62,7 @@ export const useStudioStore = defineStore("studio", () => {
   const showScrollToBottom = ref(false);
   const droppedFileScopes = ref<Record<string, string[]>>({});
   const attachmentScopes = ref<Record<string, ChatAttachment[]>>({});
+  const copiedMessageRefs = ref<Record<string, CopiedMessageRef>>({});
 
   let disconnectTimer: ReturnType<typeof setInterval> | null = null;
   let saveChatsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -445,7 +447,8 @@ export const useStudioStore = defineStore("studio", () => {
   async function persistUiState() {
     await window.studio.saveUiState({
       activeChatId: activeChatId.value,
-      draftChat: draftChat.value ? clone(draftChat.value) : null
+      draftChat: draftChat.value ? clone(draftChat.value) : null,
+      copiedMessageRefs: clone(copiedMessageRefs.value)
     });
   }
 
@@ -456,6 +459,7 @@ export const useStudioStore = defineStore("studio", () => {
     const requestText = text || "Use the attached file(s) as context.";
 
     if (text && await handleLocalCommand(text)) return;
+    if (await tryAnswerMessageIdLookup(chat, requestText)) return;
 
     const contextFiles = extractMentionedFiles(requestText, projectFiles.value);
     const mentions = Array.from(requestText.matchAll(/@([^\s`"'<>]+)/g)).map((m) => m[1]);
@@ -618,6 +622,88 @@ export const useStudioStore = defineStore("studio", () => {
     scrollToBottom("smooth");
   }
 
+  async function tryAnswerMessageIdLookup(chat: Chat, requestText: string) {
+    const ids = extractMovoIds(requestText);
+    if (!ids.length || !isDirectMessageTextLookupRequest(requestText)) return false;
+
+    const results = ids.map((id) => ({ id, reference: findMovoMessageReference(id) }));
+    const userMessage = makeMessage("user", requestText);
+    chat.messages.push(userMessage);
+    chat.draft = "";
+    chat.updatedAt = now();
+
+    const lines = ["متن پیام بر اساس ID کپی‌شده از Movo:"];
+    for (const result of results) {
+      if (!result.reference) {
+        lines.push("", `- ID \`${result.id}\` در چت‌های ذخیره‌شده Movo پیدا نشد.`);
+        continue;
+      }
+      lines.push(
+        "",
+        `- ID: \`${result.reference.id}\``,
+        `- Chat: ${result.reference.chatTitle}`,
+        `- Role: ${result.reference.role}`,
+        "",
+        "```text",
+        result.reference.text || "(empty)",
+        "```"
+      );
+    }
+    chat.messages.push(makeMessage("assistant", lines.join("\n")));
+
+    if (draftChat.value?.id === chat.id) {
+      chats.value.unshift(chat);
+      activeChatId.value = chat.id;
+      draftChat.value = null;
+    }
+    await persistChats();
+    await persistUiState();
+    await nextTick();
+    scrollToBottom("smooth");
+    return true;
+  }
+
+  function findMovoMessageReference(id: string): MovoMessageReference | null {
+    const normalizedId = id.toLowerCase();
+    const copied = Object.values(copiedMessageRefs.value).find((item) => item.id.toLowerCase() === normalizedId);
+    if (copied) {
+      return {
+        id: copied.id,
+        role: copied.role,
+        text: copied.text,
+        chatId: copied.chatId,
+        chatTitle: copied.chatTitle || translate("untitled")
+      };
+    }
+    const seen = new Set<string>();
+    const sourceChats = [draftChat.value, ...chats.value].filter((item): item is Chat => Boolean(item));
+    for (const sourceChat of sourceChats) {
+      if (seen.has(sourceChat.id)) continue;
+      seen.add(sourceChat.id);
+      const message = sourceChat.messages.find((item) => item.id.toLowerCase() === normalizedId);
+      if (message) {
+        return {
+          id: message.id,
+          role: message.role,
+          text: message.text,
+          chatId: sourceChat.id,
+          chatTitle: sourceChat.title || translate("untitled")
+        };
+      }
+      const queued = sourceChat.queuedMessages.find((item) => item.id.toLowerCase() === normalizedId);
+      if (queued) {
+        return {
+          id: queued.id,
+          role: "user",
+          text: queued.text,
+          chatId: sourceChat.id,
+          chatTitle: sourceChat.title || translate("untitled")
+        };
+      }
+    }
+    return null;
+  }
+
   function buildPromptWithCommandContext(chat: Chat, text: string, currentMessageId = "", currentTurnId = "") {
     const identity = buildMovoIdentityInstruction();
     const movoReferences = buildMovoReferenceContext(chat, text, currentMessageId, currentTurnId);
@@ -634,8 +720,8 @@ export const useStudioStore = defineStore("studio", () => {
   function buildMovoReferenceContext(chat: Chat, requestText: string, currentMessageId: string, currentTurnId: string) {
     const requestedIds = extractMovoIds(requestText);
     const referencedMessages = requestedIds
-      .map((id) => chat.messages.find((message) => message.id === id))
-      .filter((message): message is ChatMessage => Boolean(message));
+      .map((id) => findMovoMessageReference(id))
+      .filter((message): message is MovoMessageReference => Boolean(message));
     const referenceIds = new Set(referencedMessages.map((message) => message.id));
     const recent = chat.messages
       .filter((message) => !referenceIds.has(message.id))
@@ -643,7 +729,7 @@ export const useStudioStore = defineStore("studio", () => {
     const referenceLines = referencedMessages.map((message) => {
       const marker = message.id === currentMessageId ? " current-request" : "";
       const preview = singleLinePreview(stripHtmlForReference(message.text), 1200);
-      return `- referenced_message${marker}: movo_message_id=${message.id} | role=${message.role} | ${preview}`;
+      return `- referenced_message${marker}: movo_message_id=${message.id} | role=${message.role} | chat="${message.chatTitle}" | ${preview}`;
     });
     const recentLines = recent.map((message) => {
       const marker = message.id === currentMessageId ? " current-request" : "";
@@ -1210,6 +1296,21 @@ export const useStudioStore = defineStore("studio", () => {
     void navigator.clipboard.writeText(text);
   }
 
+  function copyMessageReference(message: ChatMessage) {
+    const chat = activeChat.value;
+    copiedMessageRefs.value[message.id] = {
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      chatId: chat?.id || "",
+      chatTitle: chat?.title || translate("untitled"),
+      copiedAt: now()
+    };
+    copiedMessageRefs.value = pruneCopiedRefs(copiedMessageRefs.value);
+    void navigator.clipboard.writeText(message.id);
+    scheduleUiSave();
+  }
+
   async function openProjectFolder() {
     const folder = projectRoot.value;
     if (!folder) return;
@@ -1297,6 +1398,7 @@ export const useStudioStore = defineStore("studio", () => {
     language.setLanguage(appSettings.value.language || "en");
     chats.value = (settings.chats || []).map((chat) => normalizeChat(chat, translate("untitled")));
     draftChat.value = settings.ui?.draftChat ? normalizeChat(settings.ui.draftChat, translate("untitled")) : null;
+    copiedMessageRefs.value = normalizeCopiedMessageRefs(settings.ui?.copiedMessageRefs || {});
     activeChatId.value = settings.ui?.activeChatId && chats.value.some((chat) => chat.id === settings.ui?.activeChatId)
       ? settings.ui.activeChatId
       : chats.value[0]?.id || "";
@@ -1487,6 +1589,7 @@ export const useStudioStore = defineStore("studio", () => {
     saveEditChat,
     revertTo,
     copyMessage,
+    copyMessageReference,
     openProjectFolder,
     exportCurrentChat,
     importSession,
@@ -1570,6 +1673,49 @@ function stripHtmlForReference(value: string) {
 
 function extractMovoIds(value: string) {
   return Array.from(new Set(value.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) || []));
+}
+
+function isDirectMessageTextLookupRequest(value: string) {
+  const withoutIds = value
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, " ")
+    .toLowerCase();
+  const actionIntent = new RegExp([
+    "\\u0628\\u0647\\s+\\u0647\\u0645(?:\\u06cc|\\u064a)\\u0646",
+    "\\u0647\\u0645(?:\\u06cc|\\u064a)\\u0646\\s+\\u067e(?:\\u06cc|\\u064a)\\u0627\\u0645",
+    "\\u0628\\u0631\\u0627(?:\\u06cc|\\u064a)",
+    "\\u0628\\u062f\\u0647",
+    "\\u067e\\u0627\\u0633\\u062e",
+    "\\u062c\\u0648\\u0627\\u0628",
+    "answer",
+    "respond",
+    "for\\s+"
+  ].join("|"), "i");
+  if (actionIntent.test(withoutIds)) return false;
+
+  const lookupIntent = new RegExp([
+    "\\u0645\\u062a\\u0646.*(?:\\u0686(?:\\u06cc|\\u064a)|\\u0686\\u0647|\\u0628\\u0648\\u062f\\u0647|\\u0628\\u06af\\u0648|\\u0646\\u0645\\u0627(?:\\u06cc|\\u064a)\\u0634)",
+    "(?:\\u0686(?:\\u06cc|\\u064a)|\\u0686\\u0647).*\\u0645\\u062a\\u0646",
+    "\\u0646\\u0648\\u0634\\u062a\\u0647.*(?:\\u0686(?:\\u06cc|\\u064a)|\\u0686\\u0647|\\u0628\\u0648\\u062f\\u0647)",
+    "(?:message|text|content).*(?:what|show|display|was|is)",
+    "(?:what|show|display).*(?:message|text|content)"
+  ].join("|"), "i");
+  return lookupIntent.test(withoutIds);
+}
+
+function isMessageTextLookupRequest(value: string) {
+  return /(متن|پیام|درخواست|چی بوده|چه بوده|بگو|نوشته|message|text|content|what did|what was|show)/i.test(value);
+}
+
+function normalizeCopiedMessageRefs(value: Record<string, CopiedMessageRef>) {
+  const entries = Object.values(value || {})
+    .filter((item) => item?.id && typeof item.text === "string")
+    .sort((a, b) => new Date(b.copiedAt || 0).getTime() - new Date(a.copiedAt || 0).getTime())
+    .slice(0, 500);
+  return Object.fromEntries(entries.map((item) => [item.id, item]));
+}
+
+function pruneCopiedRefs(value: Record<string, CopiedMessageRef>) {
+  return normalizeCopiedMessageRefs(value);
 }
 
 function singleLinePreview(value: string, maxLength: number) {

@@ -82,8 +82,8 @@ function copyMessageText(text: string) {
   copyMenuId.value = "";
 }
 
-function copyMessageId(id: string) {
-  studio.copyMessage(id);
+function copyMessageId(message: { id: string; role: "user" | "assistant" | "system"; text: string; createdAt: string }) {
+  studio.copyMessageReference(message);
   copyMenuId.value = "";
 }
 
@@ -250,7 +250,7 @@ function activityOpenPath(detail = "") {
                   </button>
                   <div v-if="copyMenuId === message.id" class="msg-copy-menu">
                     <button type="button" @click="copyMessageText(message.text)">Copy message</button>
-                    <button type="button" @click="copyMessageId(message.id)">Copy ID</button>
+                    <button type="button" @click="copyMessageId(message)">Copy ID</button>
                   </div>
                 </div>
                 <button
