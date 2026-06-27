@@ -113,6 +113,39 @@ function setDirFromNextInline(tokens: Token[], idx: number) {
   tokens[idx].attrSet("dir", lineDir(plainInlineText(inline)));
 }
 
+function decorateLocalizedVersions(state: { Token: new (type: string, tag: string, nesting: never) => Token }, token: Token) {
+  if (!token.children?.length) return;
+  const versionPattern = /([0-9\u0660-\u0669\u06F0-\u06F9]+(?:\.[0-9\u0660-\u0669\u06F0-\u06F9]+){1,4}(?:[-+][A-Za-z0-9.-]+)?)/g;
+  const nextChildren: Token[] = [];
+  for (const child of token.children) {
+    if (child.type !== "text" || !versionPattern.test(child.content)) {
+      nextChildren.push(child);
+      versionPattern.lastIndex = 0;
+      continue;
+    }
+    versionPattern.lastIndex = 0;
+    let cursor = 0;
+    for (const match of child.content.matchAll(versionPattern)) {
+      const index = match.index || 0;
+      if (index > cursor) {
+        const text = new state.Token("text", "", 0 as never);
+        text.content = child.content.slice(cursor, index);
+        nextChildren.push(text);
+      }
+      const version = new state.Token("html_inline", "", 0 as never);
+      version.content = `<span class="md-version" dir="ltr">${md.utils.escapeHtml(match[0])}</span>`;
+      nextChildren.push(version);
+      cursor = index + match[0].length;
+    }
+    if (cursor < child.content.length) {
+      const text = new state.Token("text", "", 0 as never);
+      text.content = child.content.slice(cursor);
+      nextChildren.push(text);
+    }
+  }
+  token.children = nextChildren;
+}
+
 for (const rule of ["paragraph_open", "heading_open", "blockquote_open", "th_open", "td_open"] as const) {
   const fallback = md.renderer.rules[rule] || ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
   md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
@@ -136,6 +169,7 @@ md.core.ruler.after("inline", "movo_advanced_blocks", (state) => {
     if (token.type === "bullet_list_open") token.attrJoin("class", "md-bullet-list");
 
     if (token.type === "inline" && token.children?.length) {
+      decorateLocalizedVersions(state, token);
       const first = token.children[0];
       const task = first?.type === "text" ? first.content.match(/^\[( |x|X)\]\s+/) : null;
       if (task) {
