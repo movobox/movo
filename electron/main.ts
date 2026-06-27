@@ -2026,18 +2026,23 @@ function summarizeMimoToolEvent(event: any): { text: string; detail: string; cod
   if (normalizedTool === "read") {
     const filePath = input.filePath || input.path || input.file || "";
     const renderedOutput = output ? stringifyToolValue(output) : "";
+    const readOutput = parseReadToolOutput(renderedOutput);
+    const readPath = readOutput.path || filePath;
+    const readContent = readOutput.content || renderedOutput;
     return {
-      text: `Reading ${filePath ? basename(filePath) : "file"}`,
+      text: `Reading ${readPath ? basename(readPath) : "file"}`,
       detail: joinDetail([
-        filePath && `Path: ${filePath}`,
+        readPath && `Path: ${readPath}`,
+        readOutput.type && `Type: ${readOutput.type}`,
+        readOutput.lineCount && `Lines: ${readOutput.lineCount}`,
         input.offset !== undefined && `Offset: ${input.offset}`,
         input.limit !== undefined && `Limit: ${input.limit}`,
         input.start !== undefined && `Start: ${input.start}`,
-        input.end !== undefined && `End: ${input.end}`,
-        renderedOutput && `Preview:\n${formatOutputPreview(renderedOutput, 8)}`
+        input.end !== undefined && `End: ${input.end}`
       ]),
-      code: renderedOutput || undefined,
-      codeLang: renderedOutput ? extToLang(filePath) : undefined
+      code: readContent || undefined,
+      codeLang: readContent ? extToLang(readPath) : undefined,
+      editFilePath: readPath || undefined
     };
   }
 
@@ -2322,6 +2327,36 @@ function formatOutputPreview(value: any, maxLines = 8) {
   const lines = text.split(/\r?\n/);
   const preview = lines.slice(0, maxLines).join("\n");
   return `${preview}${lines.length > maxLines ? `\n... (${lines.length - maxLines} more lines)` : ""}`;
+}
+
+function parseReadToolOutput(value: string): { path: string; type: string; content: string; lineCount: number } {
+  const raw = unwrapToolValue(value);
+  const path = raw.match(/<path>([\s\S]*?)<\/path>/i)?.[1]?.trim() || "";
+  const type = raw.match(/<type>([\s\S]*?)<\/type>/i)?.[1]?.trim() || "";
+  const contentRaw = raw.match(/<content>\s*([\s\S]*?)\s*<\/content>/i)?.[1] || "";
+  const content = stripReadLineNumbers(contentRaw.trim());
+  const endLineCount = Number(raw.match(/\(End of file - total\s+(\d+)\s+lines?\)/i)?.[1] || 0);
+  const lineCount = endLineCount || (content ? content.split(/\r?\n/).length : 0);
+  return { path, type, content, lineCount };
+}
+
+function unwrapToolValue(value: string) {
+  const clean = value.trim();
+  try {
+    const parsed = JSON.parse(clean);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as Record<string, unknown>).value === "string") {
+      return String((parsed as Record<string, unknown>).value);
+    }
+  } catch {}
+  return clean;
+}
+
+function stripReadLineNumbers(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*\d+:\s?/, ""))
+    .join("\n")
+    .trimEnd();
 }
 
 function formatToolParameters(input: Record<string, any>, metadata: Record<string, any>) {

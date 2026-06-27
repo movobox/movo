@@ -1428,6 +1428,8 @@ function fuzzyScore(value: string, query: string) {
 }
 
 function normalizeRunActivity(activity: RunActivity): RunActivity {
+  const readActivity = normalizeReadActivity(activity);
+  if (readActivity) return readActivity;
   const sections = parseStructuredActivityDetail(activity.detail);
   if (!sections) return activity;
   const detail = formatStructuredActivityDetail(sections);
@@ -1439,6 +1441,56 @@ function normalizeRunActivity(activity: RunActivity): RunActivity {
     codeLang: activity.codeLang || extToCodeLang(filePath),
     editFilePath: activity.editFilePath || sections.target || undefined
   };
+}
+
+function normalizeReadActivity(activity: RunActivity): RunActivity | null {
+  if (!/\breading\b/i.test(activity.text)) return null;
+  const source = activity.code || activity.detail;
+  const parsed = parseReadToolOutput(source);
+  if (!parsed.content) return null;
+  const filePath = activity.editFilePath || parsed.path || activity.detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "";
+  return {
+    ...activity,
+    text: filePath ? `Reading ${filePath.split(/[\\/]/).pop()}` : activity.text,
+    detail: [
+      filePath && `Path: ${filePath}`,
+      parsed.type && `Type: ${parsed.type}`,
+      parsed.lineCount && `Lines: ${parsed.lineCount}`
+    ].filter(Boolean).join("\n"),
+    code: parsed.content,
+    codeLang: activity.codeLang || extToCodeLang(filePath),
+    editFilePath: filePath || activity.editFilePath
+  };
+}
+
+function parseReadToolOutput(value: string): { path: string; type: string; content: string; lineCount: number } {
+  const raw = unwrapToolValue(value);
+  const path = raw.match(/<path>([\s\S]*?)<\/path>/i)?.[1]?.trim() || "";
+  const type = raw.match(/<type>([\s\S]*?)<\/type>/i)?.[1]?.trim() || "";
+  const contentRaw = raw.match(/<content>\s*([\s\S]*?)\s*<\/content>/i)?.[1] || "";
+  const content = stripReadLineNumbers(contentRaw.trim());
+  const endLineCount = Number(raw.match(/\(End of file - total\s+(\d+)\s+lines?\)/i)?.[1] || 0);
+  const lineCount = endLineCount || (content ? content.split(/\r?\n/).length : 0);
+  return { path, type, content, lineCount };
+}
+
+function unwrapToolValue(value: string) {
+  const clean = value.trim();
+  try {
+    const parsed = JSON.parse(clean);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as Record<string, unknown>).value === "string") {
+      return String((parsed as Record<string, unknown>).value);
+    }
+  } catch {}
+  return clean;
+}
+
+function stripReadLineNumbers(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*\d+:\s?/, ""))
+    .join("\n")
+    .trimEnd();
 }
 
 function parseStructuredActivityDetail(detail: string): { target?: string; preview?: string; result?: string; before?: string; after?: string } | null {
@@ -1667,6 +1719,16 @@ function truncateActivityCode(code: string, maxLines = 40) {
 
 function formatActivityDetail(detail: string, collapsible = false) {
   const lines = detail.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const readMeta = parseReadMetaDetail(detail);
+  if (readMeta) {
+    return [
+      `<div class="activity-log-read-meta">`,
+      readMeta.path ? `<span>Path <code>${escapeHtml(readMeta.path)}</code></span>` : "",
+      readMeta.type ? `<span>Type <code>${escapeHtml(readMeta.type)}</code></span>` : "",
+      readMeta.lines ? `<span>Lines <code>${escapeHtml(readMeta.lines)}</code></span>` : "",
+      `</div>`
+    ].join("");
+  }
   const fileChange = parseFileChangeDetail(detail);
   if (fileChange) {
     return [
@@ -1691,6 +1753,15 @@ function formatActivityDetail(detail: string, collapsible = false) {
     ].join("");
   }
   return `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`;
+}
+
+function parseReadMetaDetail(detail: string): { path: string; type: string; lines: string } | null {
+  if (!/^Path:/im.test(detail) || !/^Lines:/im.test(detail)) return null;
+  return {
+    path: detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "",
+    type: detail.match(/^Type:\s*(.+)$/im)?.[1]?.trim() || "",
+    lines: detail.match(/^Lines:\s*(.+)$/im)?.[1]?.trim() || ""
+  };
 }
 
 function parseFileChangeDetail(detail: string): { path: string; note: string } | null {

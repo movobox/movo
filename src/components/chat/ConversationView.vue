@@ -128,6 +128,19 @@ function activityDetailParts(detail = "") {
   return { target, path, detected, result, extra };
 }
 
+function readDetailParts(detail = "") {
+  return {
+    path: detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "",
+    type: detail.match(/^Type:\s*(.+)$/im)?.[1]?.trim() || "",
+    lines: detail.match(/^Lines:\s*(.+)$/im)?.[1]?.trim() || ""
+  };
+}
+
+function isReadMetaDetail(detail = "") {
+  const meta = readDetailParts(detail);
+  return Boolean(meta.path && meta.lines);
+}
+
 function formatVisibleActivityResult(result: string) {
   if (!result) return "";
   if (/^(Wrote file successfully|Edit applied successfully)\.?$/i.test(result.trim())) return "";
@@ -268,6 +281,13 @@ function activityOpenPath(detail = "") {
                           Path: <code>{{ activityDetailParts(item.detail).path }}</code>
                         </span>
                         <span class="activity-change-note">Detected from project file changes while Movo is running</span>
+                      </template>
+                      <template v-else-if="isReadMetaDetail(item.detail)">
+                        <span class="activity-read-meta">
+                          <span>Path <code>{{ readDetailParts(item.detail).path }}</code></span>
+                          <span v-if="readDetailParts(item.detail).type">Type <code>{{ readDetailParts(item.detail).type }}</code></span>
+                          <span>Lines <code>{{ readDetailParts(item.detail).lines }}</code></span>
+                        </span>
                       </template>
                       <template v-else-if="!shouldCollapseActivityDetail(item)">{{ item.detail }}</template>
                       <template v-else>
