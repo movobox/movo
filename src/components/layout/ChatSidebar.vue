@@ -24,11 +24,13 @@ const { t } = useI18n();
         <div v-for="chat in group.items" :key="chat.id" class="session-row">
           <button
             class="session-item"
-            :class="{ active: chat.id === studio.activeChatId }"
+            :class="{ active: chat.id === studio.activeChatId, running: studio.chatRunStatus(chat.id) }"
+            :title="studio.chatRunStatus(chat.id) ? t('running') : chat.title"
             type="button"
             @click="studio.selectChat(chat.id)"
           >
             <Pencil :size="13" class="edit-icon" @click.stop="studio.startEditChat(chat.id)" />
+            <span v-if="studio.chatRunStatus(chat.id)" class="session-run-dot" aria-hidden="true"></span>
             <template v-if="studio.editingChatId === chat.id">
               <input
                 class="chat-title-input"
@@ -42,6 +44,9 @@ const { t } = useI18n();
             <template v-else>
               <span class="session-title">{{ chat.title }}</span>
             </template>
+            <span v-if="studio.chatRunStatus(chat.id)" class="session-run-label">
+              {{ studio.chatRunStatus(chat.id) === "stopping" ? t("stoppingResponse") : t("running") }}
+            </span>
             <span class="session-time">{{ studio.relativeTime(chat.updatedAt) }}</span>
           </button>
           <button class="delete-btn" type="button" @click="studio.deleteConfirmId = chat.id">

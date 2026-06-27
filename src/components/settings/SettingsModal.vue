@@ -215,7 +215,7 @@ function setLanguageFromSelect(event: Event) {
               <label class="field">
                 <span>Project config directory</span>
                 <input v-model="studio.appSettings.projectConfigDir" type="text" placeholder=".movo" spellcheck="false" />
-                <small>Default is <code>.movo</code>. Movo writes <code>movo.json</code> there and uses that file for project configuration.</small>
+                <small>Movo writes <code>movo.json</code> here only when this workspace is trusted. Engine config is injected globally so <code>.mimocode</code> is not created in projects.</small>
               </label>
               <label class="field">
                 <span>MCP overrides</span>

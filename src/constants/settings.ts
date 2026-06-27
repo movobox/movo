@@ -326,7 +326,7 @@ export const defaultSettings: AppSettings = {
   model: "",
   provider: "",
   agent: "build",
-  trustWorkspace: true,
+  trustWorkspace: false,
   skipPermissions: false,
   theme: "dark",
   projectConfigDir: ".movo",

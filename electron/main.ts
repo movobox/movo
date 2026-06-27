@@ -382,7 +382,7 @@ const ENGINE_ENV_PREFIX = `${"MIMO"}CODE`;
 
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
-  trustWorkspace: true, skipPermissions: false, theme: "dark",
+  trustWorkspace: false, skipPermissions: false, theme: "dark",
   projectConfigDir: MOVO_PROJECT_CONFIG_DIR,
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true }, memory: { enabled: true },
@@ -1026,23 +1026,22 @@ function projectConfigDirPath(folder: string, appSettings: AppSettings) {
   return join(base, defaultAppSettings.projectConfigDir);
 }
 
-function shouldOverrideMimoConfigDir(appSettings: AppSettings) {
-  const raw = (appSettings.projectConfigDir || defaultAppSettings.projectConfigDir).trim();
-  return Boolean(raw && raw !== LEGACY_PROJECT_CONFIG_DIR);
-}
-
 function engineProfileRoot() {
   return join(app.getPath("userData"), "movo-engine-profile");
 }
 
+function engineDatabasePath() {
+  return join(engineProfileRoot(), "data", "movo.db");
+}
+
 function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
+  const config = buildEngineConfig(projectFolder, appSettings, appSettings.trustWorkspace);
   const env: Record<string, string> = {
-    [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot()
+    [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot(),
+    [`${ENGINE_ENV_PREFIX}_DB`]: engineDatabasePath(),
+    [`${ENGINE_ENV_PREFIX}_CONFIG_CONTENT`]: JSON.stringify(config),
+    [`${ENGINE_ENV_PREFIX}_DISABLE_PROJECT_CONFIG`]: "true"
   };
-  if (shouldOverrideMimoConfigDir(appSettings)) {
-    env[`${ENGINE_ENV_PREFIX}_CONFIG_DIR`] = projectConfigDirPath(projectFolder, appSettings);
-    env[`${ENGINE_ENV_PREFIX}_CONFIG`] = projectConfigPathForSettings(projectFolder, appSettings);
-  }
   return env;
 }
 
@@ -1224,12 +1223,10 @@ function runCommandCapture(command: string, args: string[], cwd: string, timeout
   });
 }
 
-function writeProjectConfig(folder: string, appSettings: AppSettings) {
-  const file = projectConfigPathForSettings(folder, appSettings);
-  if (!file) return;
-  mkdirSync(dirname(file), { recursive: true });
+function buildEngineConfig(folder: string, appSettings: AppSettings, includeProjectConfig = false) {
+  const file = includeProjectConfig ? projectConfigPathForSettings(folder, appSettings) : "";
   let existing: Record<string, unknown> = {};
-  if (existsSync(file)) { try { existing = JSON.parse(readFileSync(file, "utf8")); } catch { existing = {}; } }
+  if (file && existsSync(file)) { try { existing = JSON.parse(readFileSync(file, "utf8")); } catch { existing = {}; } }
   const perm = appSettings.permissions || {};
   const config: Record<string, unknown> = {
     ...existing,
@@ -1254,6 +1251,15 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   mergeJsonConfig(config, "server", appSettings.serverJson);
   mergeJsonConfig(config, "instructions", withDefaultInstructions(appSettings.instructionsJson));
   mergeJsonConfig(config, "provider", appSettings.providerJson);
+  return config;
+}
+
+function writeProjectConfig(folder: string, appSettings: AppSettings) {
+  if (!appSettings.trustWorkspace) return;
+  const file = projectConfigPathForSettings(folder, appSettings);
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true });
+  const config = buildEngineConfig(folder, appSettings, true);
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
 }
 
@@ -1413,9 +1419,11 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       return;
     }
     const engineHome = envExtra[`${ENGINE_ENV_PREFIX}_HOME`];
+    const engineDb = envExtra[`${ENGINE_ENV_PREFIX}_DB`];
     const engineConfigDir = envExtra[`${ENGINE_ENV_PREFIX}_CONFIG_DIR`];
     const engineConfig = envExtra[`${ENGINE_ENV_PREFIX}_CONFIG`];
     if (engineHome) mkdirSync(engineHome, { recursive: true });
+    if (engineDb) mkdirSync(dirname(engineDb), { recursive: true });
     if (engineConfigDir) mkdirSync(engineConfigDir, { recursive: true });
     if (engineConfig) mkdirSync(dirname(engineConfig), { recursive: true });
     const child = spawn(binary, args, {

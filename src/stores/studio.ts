@@ -136,6 +136,12 @@ export const useStudioStore = defineStore("studio", () => {
     return fuzzyFiles(projectFiles.value, query).slice(0, 8);
   });
 
+  function chatRunStatus(chatId: string) {
+    const state = runStates.value[chatId];
+    if (!state?.isRunning) return "";
+    return state.isStopping ? "stopping" : "running";
+  }
+
   const chatSizeInfo = computed(() => {
     const chat = activeChat.value;
     if (!chat) return null;
@@ -310,7 +316,9 @@ export const useStudioStore = defineStore("studio", () => {
     if (existingConfig.ok && existingConfig.raw) {
       appSettings.value = settingsFromProjectConfig(existingConfig.config);
     }
-    await window.studio.saveProjectConfig({ folder, appSettings: clone(appSettings.value) });
+    if (appSettings.value.trustWorkspace) {
+      await window.studio.saveProjectConfig({ folder, appSettings: clone(appSettings.value) });
+    }
     await loadProjectFiles();
     schedulePersistence();
   }
@@ -332,7 +340,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   async function saveAppSettings() {
     await window.studio.saveSettings(clone(appSettings.value));
-    if (activeChat.value?.folder) {
+    if (appSettings.value.trustWorkspace && activeChat.value?.folder) {
       await window.studio.saveProjectConfig({ folder: activeChat.value.folder, appSettings: clone(appSettings.value) });
     }
   }
@@ -1223,6 +1231,7 @@ export const useStudioStore = defineStore("studio", () => {
     canRun,
     chatSizeInfo,
     projectGroups,
+    chatRunStatus,
     lineDir,
     relativeTime,
     updateScrollState,
