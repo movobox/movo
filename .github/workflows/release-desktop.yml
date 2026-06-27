@@ -24,19 +24,12 @@ jobs:
           - platform: windows
             os: windows-latest
             script: build:win
-            assets: |
-              release/*.exe
           - platform: macos
             os: macos-latest
             script: build:mac
-            assets: |
-              release/*.dmg
           - platform: linux
             os: ubuntu-latest
             script: build:linux
-            assets: |
-              release/*.AppImage
-              release/*.deb
 
     steps:
       - name: Checkout
@@ -54,10 +47,36 @@ jobs:
       - name: Build production installer
         run: npm run ${{ matrix.script }}
 
+      - name: Normalize installer names
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path upload | Out-Null
+
+          if ("${{ matrix.platform }}" -eq "windows") {
+            $exe = Get-ChildItem -Path release -Recurse -Filter *.exe | Sort-Object Length -Descending | Select-Object -First 1
+            if (-not $exe) { throw "Windows installer was not found." }
+            Copy-Item $exe.FullName upload/Movo-Setup-Windows.exe
+          }
+
+          if ("${{ matrix.platform }}" -eq "macos") {
+            $dmg = Get-ChildItem -Path release -Recurse -Filter *.dmg | Sort-Object Length -Descending | Select-Object -First 1
+            if (-not $dmg) { throw "macOS installer was not found." }
+            Copy-Item $dmg.FullName upload/Movo-Installer-macOS.dmg
+          }
+
+          if ("${{ matrix.platform }}" -eq "linux") {
+            $appImage = Get-ChildItem -Path release -Recurse -Filter *.AppImage | Sort-Object Length -Descending | Select-Object -First 1
+            $deb = Get-ChildItem -Path release -Recurse -Filter *.deb | Sort-Object Length -Descending | Select-Object -First 1
+            if (-not $appImage) { throw "Linux AppImage was not found." }
+            if (-not $deb) { throw "Linux deb package was not found." }
+            Copy-Item $appImage.FullName upload/Movo-Linux.AppImage
+            Copy-Item $deb.FullName upload/Movo-Linux.deb
+          }
+
       - name: Upload installer to release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.assets }}
+          files: upload/*
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
