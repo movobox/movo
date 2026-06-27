@@ -620,7 +620,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   function buildPromptWithCommandContext(chat: Chat, text: string, currentMessageId = "", currentTurnId = "") {
     const identity = buildMovoIdentityInstruction();
-    const movoReferences = buildMovoReferenceContext(chat, currentMessageId, currentTurnId);
+    const movoReferences = buildMovoReferenceContext(chat, text, currentMessageId, currentTurnId);
     const commandBlocks = chat.messages
       .filter((message) => message.role === "system" && message.text.startsWith("Command output entered context:"))
       .slice(-3)
@@ -631,9 +631,21 @@ export const useStudioStore = defineStore("studio", () => {
     return `${withIdentity}\n\nRecent command context:\n${commandBlocks}`;
   }
 
-  function buildMovoReferenceContext(chat: Chat, currentMessageId: string, currentTurnId: string) {
-    const recent = chat.messages.slice(-24);
-    const lines = recent.map((message) => {
+  function buildMovoReferenceContext(chat: Chat, requestText: string, currentMessageId: string, currentTurnId: string) {
+    const requestedIds = extractMovoIds(requestText);
+    const referencedMessages = requestedIds
+      .map((id) => chat.messages.find((message) => message.id === id))
+      .filter((message): message is ChatMessage => Boolean(message));
+    const referenceIds = new Set(referencedMessages.map((message) => message.id));
+    const recent = chat.messages
+      .filter((message) => !referenceIds.has(message.id))
+      .slice(-40);
+    const referenceLines = referencedMessages.map((message) => {
+      const marker = message.id === currentMessageId ? " current-request" : "";
+      const preview = singleLinePreview(stripHtmlForReference(message.text), 1200);
+      return `- referenced_message${marker}: movo_message_id=${message.id} | role=${message.role} | ${preview}`;
+    });
+    const recentLines = recent.map((message) => {
       const marker = message.id === currentMessageId ? " current-request" : "";
       const preview = singleLinePreview(stripHtmlForReference(message.text), 180);
       return `- ${message.role}${marker}: movo_message_id=${message.id} | ${preview}`;
@@ -641,8 +653,10 @@ export const useStudioStore = defineStore("studio", () => {
     return [
       "<movo_references>",
       "Movo message/request IDs are first-class references. If the user provides a UUID-like Movo ID, match it against movo_message_id below before saying you cannot access it.",
+      "When a referenced_message is present, use its text as the source of truth for questions about that ID.",
       currentTurnId && `current_turn_id=${currentTurnId}`,
-      ...lines,
+      ...referenceLines,
+      ...recentLines,
       "</movo_references>"
     ].filter(Boolean).join("\n");
   }
@@ -1552,6 +1566,10 @@ function stripHtmlForReference(value: string) {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&");
+}
+
+function extractMovoIds(value: string) {
+  return Array.from(new Set(value.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) || []));
 }
 
 function singleLinePreview(value: string, maxLength: number) {
