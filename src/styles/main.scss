@@ -931,11 +931,32 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 }
 .activity-log-item {
   display: grid;
-  gap: 6px;
-  padding: 9px 10px;
+  position: relative;
+  gap: 8px;
+  padding: 10px 11px 10px 13px;
   border: 1px solid #202026;
-  border-radius: 8px;
-  background: #111116;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #121217, #0f0f13);
+  overflow: hidden;
+}
+.activity-log-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #3f3f46;
+}
+.activity-log-item.kind-code-write::before,
+.activity-log-item.kind-file-watch::before { background: #22c55e; }
+.activity-log-item.kind-file-create::before { background: #38bdf8; }
+.activity-log-item.kind-diff::before { background: #a78bfa; }
+.activity-log-item.kind-read::before { background: #60a5fa; }
+.activity-log-item.kind-search::before { background: #eab308; }
+.activity-log-item.kind-command::before { background: #c084fc; }
+.activity-log-item.kind-error::before { background: #ef4444; }
+.activity-log-item:hover {
+  border-color: #2f2f38;
+  background: linear-gradient(180deg, #15151b, #111116);
 }
 .activity-log-item.error {
   border-color: rgba(239, 68, 68, 0.35);
@@ -969,10 +990,57 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   font-size: 11px;
   font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
 }
+.activity-log-glyph {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #1f1f27;
+  color: #a1a1aa;
+}
+.activity-log-glyph::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.kind-code-write .activity-log-glyph,
+.kind-file-watch .activity-log-glyph { color: #22c55e; background: rgba(34,197,94,0.12); }
+.kind-file-create .activity-log-glyph { color: #38bdf8; background: rgba(56,189,248,0.12); }
+.kind-diff .activity-log-glyph { color: #a78bfa; background: rgba(167,139,250,0.12); }
+.kind-read .activity-log-glyph { color: #60a5fa; background: rgba(96,165,250,0.12); }
+.kind-search .activity-log-glyph { color: #eab308; background: rgba(234,179,8,0.12); }
+.kind-command .activity-log-glyph { color: #c084fc; background: rgba(192,132,252,0.12); }
+.kind-error .activity-log-glyph { color: #ef4444; background: rgba(239,68,68,0.14); }
 .activity-log-title {
+  flex: 1;
+  min-width: 0;
   color: #e4e4e7;
   font-size: 13px;
   font-weight: 600;
+}
+.activity-log-status {
+  margin-inline-start: auto;
+  padding: 2px 7px;
+  border: 1px solid #2a2a32;
+  border-radius: 999px;
+  background: #18181f;
+  color: #a1a1aa;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.activity-log-status.success,
+.activity-log-status.detected {
+  border-color: rgba(34,197,94,0.24);
+  background: rgba(34,197,94,0.08);
+  color: #86efac;
+}
+.activity-log-status.failed {
+  border-color: rgba(239,68,68,0.28);
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
 }
 .activity-log-detail,
 .activity-log-code {
@@ -995,6 +1063,18 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 }
 .activity-log-code.diff {
   color: #cbd5e1;
+}
+.activity-log-result {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 7px;
+  background: rgba(34, 197, 94, 0.07);
+  color: #a7f3d0;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 .activity-log-details {
   margin: 8px 0 0;
@@ -1022,6 +1102,37 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+.activity-log-change {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(34,197,94,0.16);
+  border-radius: 8px;
+  background: rgba(34,197,94,0.045);
+}
+.activity-log-change-label {
+  color: #71717a;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.activity-log-change code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(34,197,94,0.1);
+  color: #bbf7d0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-log-change-note {
+  grid-column: 2;
+  color: #71717a;
+  font-size: 11.5px;
 }
 .activity-log-files code,
 .activity-log-file code {
@@ -1222,11 +1333,45 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   min-width: 0;
   flex: 1;
 }
+.activity-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .activity-title {
+  flex: 1;
+  min-width: 0;
   color: #d4d4d8;
   font-size: 13px;
   line-height: 1.4;
   font-weight: 500;
+}
+.activity-status {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid #2a2a32;
+  border-radius: 999px;
+  background: #18181f;
+  color: #a1a1aa;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.activity-status.success,
+.activity-status.detected {
+  border-color: rgba(34,197,94,0.22);
+  background: rgba(34,197,94,0.08);
+  color: #86efac;
+}
+.activity-status.running {
+  border-color: rgba(99,102,241,0.22);
+  background: rgba(99,102,241,0.08);
+  color: #c7d2fe;
+}
+.activity-status.failed {
+  border-color: rgba(239,68,68,0.28);
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
 }
 .activity-detail {
   color: #71717a;
@@ -1245,16 +1390,37 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   scrollbar-color: #333 transparent;
 }
 .activity-detail.collapsed {
-  order: 3;
+  order: 1;
   max-height: none;
   padding: 0;
   overflow: visible;
   background: transparent;
-  border-style: dashed;
+  border: 0;
   word-break: normal;
 }
+.activity-inline-target {
+  display: block;
+  padding: 5px 0;
+  color: #9ca3af;
+}
+.activity-inline-target code {
+  padding: 2px 6px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.1);
+  color: #c4b5fd;
+}
+.activity-change-note {
+  display: block;
+  margin-top: 3px;
+  color: #71717a;
+  font-size: 11.5px;
+}
 .activity-inline-details {
+  order: 4;
   overflow: hidden;
+  border: 1px dashed #2a2a32;
+  border-radius: 7px;
 }
 .activity-inline-details summary {
   padding: 6px 10px;
@@ -1313,6 +1479,30 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 .activity-shield .activity-detail { border-color: rgba(239,68,68,0.15); }
 .activity-step .activity-detail { border-color: rgba(99,102,241,0.15); }
 .activity-done .activity-detail { border-color: rgba(34,197,94,0.15); }
+.activity-kind-code-write,
+.activity-kind-file-watch,
+.activity-kind-file-create,
+.activity-kind-diff {
+  border: 1px solid rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.018);
+}
+.activity-kind-code-write .activity-icon,
+.activity-kind-file-watch .activity-icon {
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+}
+.activity-kind-file-create .activity-icon {
+  background: rgba(56,189,248,0.12);
+  color: #38bdf8;
+}
+.activity-kind-diff .activity-icon {
+  background: rgba(167,139,250,0.12);
+  color: #a78bfa;
+}
+.activity-kind-error .activity-icon {
+  background: rgba(239,68,68,0.12);
+  color: #ef4444;
+}
 @keyframes activity-in {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1333,6 +1523,19 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 }
 .activity-diff {
   order: 2;
+}
+.activity-result {
+  order: 3;
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.06);
+  color: #a7f3d0;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 .activity-code {
   background: #0d0d0f;

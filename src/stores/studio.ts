@@ -5,9 +5,11 @@ import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
 import type { AppSettings, Chat, ChatAttachment, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
 import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime, uid } from "../utils/chat";
+import { highlightCode } from "../utils/highlight";
 import { useLanguageStore } from "./language";
 
 type CliStatus = { installed: boolean; version: string; checked: boolean };
+type RunActivity = { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
 const APP_NAME = "Movo";
 const APP_VERSION = pkg.version || "0.1.0";
 
@@ -27,7 +29,6 @@ export const useStudioStore = defineStore("studio", () => {
   const showModelMenu = ref(false);
   const deleteConfirmId = ref("");
   const folderMenuOpenFor = ref("");
-  type RunActivity = { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
   type TimelineItem =
     | { kind: "text"; text: string }
     | { kind: "activity"; text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
@@ -742,15 +743,16 @@ export const useStudioStore = defineStore("studio", () => {
     const clean = text.trim();
     if (!clean) return;
     if (isIgnorableAgentFallbackText(clean) || isIgnorableAgentFallbackText(detail)) return;
-    if (!isUsefulProjectActivity(clean, detail, { code, oldCode, newCode, editFilePath })) return;
+    const normalized = normalizeRunActivity({ text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (!isUsefulProjectActivity(normalized.text, normalized.detail, normalized)) return;
     const runState = ensureRunState(chatId);
     const last = runState.activities[runState.activities.length - 1];
-    if (last && last.text === clean && last.detail === detail.trim() && last.code === code) return;
-    runState.activities.push({ text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    if (last && last.text === normalized.text && last.detail === normalized.detail && last.code === normalized.code) return;
+    runState.activities.push(normalized);
     if (runState.activities.length > 50) {
       runState.activities.splice(0, runState.activities.length - 50);
     }
-    runState.timeline.push({ kind: "activity", text: clean, detail: detail.trim(), code, codeLang, oldCode, newCode, editFilePath });
+    runState.timeline.push({ kind: "activity", ...normalized });
     if (runState.timeline.length > 200) {
       runState.timeline.splice(0, runState.timeline.length - 200);
     }
@@ -1425,6 +1427,71 @@ function fuzzyScore(value: string, query: string) {
   return score - value.length * 0.01;
 }
 
+function normalizeRunActivity(activity: RunActivity): RunActivity {
+  const sections = parseStructuredActivityDetail(activity.detail);
+  if (!sections) return activity;
+  const detail = formatStructuredActivityDetail(sections);
+  const filePath = activity.editFilePath || sections.target || "";
+  return {
+    ...activity,
+    detail,
+    code: activity.code || sections.preview,
+    codeLang: activity.codeLang || extToCodeLang(filePath),
+    editFilePath: activity.editFilePath || sections.target || undefined
+  };
+}
+
+function parseStructuredActivityDetail(detail: string): { target?: string; preview?: string; result?: string; before?: string; after?: string } | null {
+  const clean = detail.trim();
+  const previewMatch = clean.match(/(?:^|\n)Preview:\s*\n?/i);
+  if (!previewMatch || previewMatch.index === undefined) return null;
+  const previewStart = previewMatch.index + previewMatch[0].length;
+  const resultMatch = clean.slice(previewStart).match(/\nResult:\s*\n?/i);
+  const previewEnd = resultMatch?.index !== undefined ? previewStart + resultMatch.index : clean.length;
+  const before = clean.slice(0, previewMatch.index).trim();
+  const preview = clean.slice(previewStart, previewEnd).trim();
+  const result = resultMatch?.index !== undefined
+    ? clean.slice(previewEnd + resultMatch[0].length).trim()
+    : "";
+  const target = before.match(/^Target:\s*(.+)$/im)?.[1]?.trim();
+  if (!preview) return null;
+  return { target, preview, result, before, after: "" };
+}
+
+function formatStructuredActivityDetail(sections: { target?: string; result?: string; before?: string; after?: string }) {
+  const parts: string[] = [];
+  if (sections.before) parts.push(sections.before);
+  if (sections.result) parts.push(`Result:\n${sections.result}`);
+  if (sections.after) parts.push(sections.after);
+  return parts.join("\n\n").trim();
+}
+
+function parseVisibleActivityDetail(detail: string): { target?: string; result?: string; extra?: string } | null {
+  const clean = detail.trim();
+  if (!clean) return null;
+  const target = clean.match(/^Target:\s*(.+)$/im)?.[1]?.trim();
+  const resultMatch = clean.match(/(?:^|\n)Result:\s*\n?([\s\S]*)$/i);
+  const result = resultMatch?.[1]?.trim();
+  const extra = clean
+    .replace(/^Target:\s*.+$/im, "")
+    .replace(/(?:^|\n)Result:\s*\n?[\s\S]*$/i, "")
+    .trim();
+  if (!target && !result && !extra) return null;
+  return { target, result, extra };
+}
+
+function extToCodeLang(filePath: string): string {
+  const ext = (filePath.split(".").pop() || "").toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+    vue: "html", py: "python", php: "php", css: "css", scss: "css",
+    json: "json", md: "markdown", html: "html", htm: "html", sh: "bash",
+    bash: "bash", rs: "rust", go: "go", java: "java", rb: "ruby",
+    c: "c", cpp: "cpp", h: "c", xml: "xml", yaml: "yaml", yml: "yaml"
+  };
+  return map[ext] || ext || "text";
+}
+
 function formatRunActivities(activities: { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string }[], elapsedMs: number) {
   const useful = activities
     .map((activity) => ({
@@ -1443,12 +1510,18 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
     `<div class="activity-log-list">`
   ];
   for (const [index, activity] of useful.entries()) {
-    lines.push(`<section class="activity-log-item${isErrorActivity(activity.text, activity.detail) ? " error" : ""}">`);
-    lines.push(`<div class="activity-log-item-head"><span class="activity-log-index">${index + 1}</span><span class="activity-log-title">${escapeHtml(activity.text)}</span></div>`);
-    if (activity.editFilePath) lines.push(`<div class="activity-log-file">File: <code>${escapeHtml(activity.editFilePath)}</code></div>`);
+    const structuredDetail = parseVisibleActivityDetail(activity.detail);
+    const kind = activityLogKind(activity.text, activity.detail, activity);
+    const status = activityStatus(activity.text, activity.detail);
+    lines.push(`<section class="activity-log-item ${escapeHtml(kind)}${isErrorActivity(activity.text, activity.detail) ? " error" : ""}">`);
+    lines.push(`<div class="activity-log-item-head"><span class="activity-log-index">${index + 1}</span><span class="activity-log-glyph"></span><span class="activity-log-title">${escapeHtml(activity.text)}</span><span class="activity-log-status ${escapeHtml(status.kind)}">${escapeHtml(status.label)}</span></div>`);
+    if (activity.editFilePath && !structuredDetail?.target) lines.push(`<div class="activity-log-file">File: <code>${escapeHtml(activity.editFilePath)}</code></div>`);
+    if (structuredDetail?.target) lines.push(`<div class="activity-log-file">Target: <code>${escapeHtml(structuredDetail.target)}</code></div>`);
     if (activity.code) {
-      lines.push(`<pre class="activity-log-code" dir="ltr"><code class="language-${escapeHtml(activity.codeLang || "text")}">${escapeHtml(truncateActivityCode(activity.code))}</code></pre>`);
-      if (activity.detail) lines.push(formatActivityDetail(activity.detail, true));
+      lines.push(renderActivityLogCode(activity.code, activity.codeLang || "text"));
+      if (structuredDetail?.result) lines.push(`<pre class="activity-log-result">${escapeHtml(structuredDetail.result)}</pre>`);
+      if (structuredDetail?.extra) lines.push(formatActivityDetail(structuredDetail.extra, true));
+      if (activity.detail && !structuredDetail) lines.push(formatActivityDetail(activity.detail, true));
     } else if (activity.detail) {
       lines.push(formatActivityDetail(activity.detail));
     }
@@ -1460,13 +1533,40 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
       if (activity.newCode) {
         diffLines.push(...truncateActivityCode(activity.newCode).split("\n").map((line) => `+${line}`));
       }
-      lines.push(`<pre class="activity-log-code diff" dir="ltr"><code>${escapeHtml(diffLines.join("\n"))}</code></pre>`);
+      lines.push(renderActivityLogCode(diffLines.join("\n"), "diff", "diff"));
     }
     lines.push(`</section>`);
   }
   lines.push(`</div>`);
   lines.push("</details>");
   return lines.join("\n").trim();
+}
+
+function renderActivityLogCode(code: string, lang: string, className = "") {
+  const normalizedLang = lang || "text";
+  const classAttr = ["activity-log-code", className].filter(Boolean).join(" ");
+  return `<pre class="${escapeHtml(classAttr)}" dir="ltr"><code class="language-${escapeHtml(normalizedLang)}">${highlightCode(truncateActivityCode(code), normalizedLang)}</code></pre>`;
+}
+
+function activityLogKind(text: string, detail: string, meta: { code?: string; oldCode?: string; newCode?: string; editFilePath?: string }) {
+  const clean = stripAnsi(`${text}\n${detail}`);
+  if (isErrorActivity(text, detail)) return "kind-error";
+  if (meta.oldCode || meta.newCode) return "kind-diff";
+  if (meta.code && /\b(write|writing|edit|create|creating)\b/i.test(clean)) return "kind-code-write";
+  if (/Detected from project file changes/i.test(clean) && /\bcreating|moving|rename/i.test(clean)) return "kind-file-create";
+  if (/Detected from project file changes/i.test(clean)) return "kind-file-watch";
+  if (/\b(read|reading)\b/i.test(clean)) return "kind-read";
+  if (/\b(search|grep|find|glob)\b/i.test(clean)) return "kind-search";
+  if (/\b(command|terminal|bash|shell)\b/i.test(clean)) return "kind-command";
+  return "kind-default";
+}
+
+function activityStatus(text: string, detail: string) {
+  const clean = stripAnsi(`${text}\n${detail}`);
+  if (isErrorActivity(text, detail)) return { kind: "failed", label: "Failed" };
+  if (/Wrote file successfully|successfully|done|complete/i.test(clean)) return { kind: "success", label: "Done" };
+  if (/Detected from project file changes/i.test(clean)) return { kind: "detected", label: "Detected" };
+  return { kind: "success", label: "Done" };
 }
 
 function isIgnorableAgentFallbackText(text: string) {
@@ -1537,6 +1637,16 @@ function truncateActivityCode(code: string, maxLines = 40) {
 
 function formatActivityDetail(detail: string, collapsible = false) {
   const lines = detail.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const fileChange = parseFileChangeDetail(detail);
+  if (fileChange) {
+    return [
+      `<div class="activity-log-change">`,
+      `<span class="activity-log-change-label">Path</span>`,
+      `<code>${escapeHtml(fileChange.path)}</code>`,
+      fileChange.note ? `<span class="activity-log-change-note">${escapeHtml(fileChange.note)}</span>` : "",
+      `</div>`
+    ].join("");
+  }
   const fileLines = lines.filter((line) => /^[-*]\s+/.test(line) || /^[A-Za-z]:[\\/]/.test(line) || line.includes("/") || line.includes("\\"));
   if (fileLines.length >= 2 && lines.some((line) => /^Files?:/i.test(line))) {
     const files = fileLines.map((line) => line.replace(/^[-*]\s+/, ""));
@@ -1551,6 +1661,18 @@ function formatActivityDetail(detail: string, collapsible = false) {
     ].join("");
   }
   return `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`;
+}
+
+function parseFileChangeDetail(detail: string): { path: string; note: string } | null {
+  const path = detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim();
+  if (!path) return null;
+  const note = detail
+    .split(/\r?\n/)
+    .filter((line) => !/^Path:/i.test(line))
+    .join("\n")
+    .trim();
+  if (!/Detected from project file changes/i.test(note)) return null;
+  return { path, note };
 }
 
 function escapeHtml(value: string) {

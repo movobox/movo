@@ -36,6 +36,24 @@ function activityIcon(text: string) {
   return "default";
 }
 
+function activityKind(item: { text: string; detail?: string; code?: string; oldCode?: string; newCode?: string; editFilePath?: string }) {
+  const clean = `${item.text}\n${item.detail || ""}`.toLowerCase();
+  if (clean.includes("error") || clean.includes("failed")) return "error";
+  if (item.oldCode || item.newCode) return "diff";
+  if (item.code && /(write|writing|edit|create|creating)/i.test(clean)) return "code-write";
+  if (clean.includes("detected from project file changes") && /(creating|moving|rename)/i.test(clean)) return "file-create";
+  if (clean.includes("detected from project file changes")) return "file-watch";
+  return activityIcon(item.text);
+}
+
+function activityStatus(item: { text: string; detail?: string }) {
+  const clean = `${item.text}\n${item.detail || ""}`;
+  if (/error|failed|failure/i.test(clean)) return { kind: "failed", label: "Failed" };
+  if (/Detected from project file changes/i.test(clean)) return { kind: "detected", label: "Detected" };
+  if (/successfully|done|complete|Wrote file successfully/i.test(clean)) return { kind: "success", label: "Done" };
+  return { kind: "running", label: "Working" };
+}
+
 function isFilePath(detail: string) {
   return /[/\\]/.test(detail) && !detail.startsWith("{") && !detail.startsWith("[");
 }
@@ -94,6 +112,25 @@ function truncateCode(code: string, maxLines = 40): string {
 
 function shouldCollapseActivityDetail(item: { detail?: string; code?: string; oldCode?: string; newCode?: string }) {
   return Boolean(item.detail && (item.code || item.oldCode || item.newCode));
+}
+
+function activityDetailParts(detail = "") {
+  const target = detail.match(/^Target:\s*(.+)$/im)?.[1]?.trim() || "";
+  const path = detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "";
+  const detected = /Detected from project file changes while Movo is running/i.test(detail);
+  const result = detail.match(/(?:^|\n)Result:\s*\n?([\s\S]*)$/i)?.[1]?.trim() || "";
+  const extra = detail
+    .replace(/^Target:\s*.+$/im, "")
+    .replace(/^Path:\s*.+$/im, "")
+    .replace(/Detected from project file changes while Movo is running/ig, "")
+    .replace(/(?:^|\n)Result:\s*\n?[\s\S]*$/i, "")
+    .trim();
+  return { target, path, detected, result, extra };
+}
+
+function activityOpenPath(detail = "") {
+  const parts = activityDetailParts(detail);
+  return parts.path || parts.target || (isFilePath(detail) ? detail : "");
 }
 </script>
 
@@ -192,7 +229,7 @@ function shouldCollapseActivityDetail(item: { detail?: string; code?: string; ol
                 <MessageContent :text="item.text" :base-folder="studio.activeChat?.folder" />
               </div>
               <div v-else-if="item.kind === 'activity'" class="activity-feed">
-                <div class="activity-row" :class="'activity-' + activityIcon(item.text)">
+                <div class="activity-row" :class="['activity-' + activityIcon(item.text), 'activity-kind-' + activityKind(item)]">
                   <div class="activity-icon">
                     <FileEdit v-if="activityIcon(item.text) === 'write'" :size="13" />
                     <FileText v-else-if="activityIcon(item.text) === 'read'" :size="13" />
@@ -203,17 +240,31 @@ function shouldCollapseActivityDetail(item: { detail?: string; code?: string; ol
                     <span v-else class="activity-dot"></span>
                   </div>
                   <div class="activity-info">
-                    <span class="activity-title">{{ item.text }}</span>
+                    <div class="activity-heading">
+                      <span class="activity-title">{{ item.text }}</span>
+                      <span class="activity-status" :class="activityStatus(item).kind">{{ activityStatus(item).label }}</span>
+                    </div>
                     <span
                       v-if="item.detail"
                       class="activity-detail"
-                      :class="{ 'activity-file-link': isFilePath(item.detail), collapsed: shouldCollapseActivityDetail(item) }"
-                      @click="isFilePath(item.detail) && openInExplorer(item.detail)"
+                      :class="{ 'activity-file-link': Boolean(activityOpenPath(item.detail)), collapsed: shouldCollapseActivityDetail(item) || activityDetailParts(item.detail).detected }"
+                      @click="activityOpenPath(item.detail) && openInExplorer(activityOpenPath(item.detail))"
                     >
-                      <template v-if="!shouldCollapseActivityDetail(item)">{{ item.detail }}</template>
-                      <details v-else class="activity-inline-details">
+                      <template v-if="activityDetailParts(item.detail).detected">
+                        <span class="activity-inline-target">
+                          Path: <code>{{ activityDetailParts(item.detail).path }}</code>
+                        </span>
+                        <span class="activity-change-note">Detected from project file changes while Movo is running</span>
+                      </template>
+                      <template v-else-if="!shouldCollapseActivityDetail(item)">{{ item.detail }}</template>
+                      <template v-else>
+                        <span v-if="activityDetailParts(item.detail).target" class="activity-inline-target">
+                          Target: <code>{{ activityDetailParts(item.detail).target }}</code>
+                        </span>
+                      </template>
+                      <details v-if="shouldCollapseActivityDetail(item) && activityDetailParts(item.detail).extra" class="activity-inline-details">
                         <summary>Details</summary>
-                        <pre>{{ item.detail }}</pre>
+                        <pre>{{ activityDetailParts(item.detail).extra }}</pre>
                       </details>
                     </span>
                     <div v-if="item.oldCode || item.newCode" class="activity-diff">
@@ -230,6 +281,7 @@ function shouldCollapseActivityDetail(item: { detail?: string; code?: string; ol
                     <div v-else-if="item.code" class="activity-code-block">
                       <pre class="activity-code"><code v-html="hl(truncateCode(item.code), item.codeLang || 'text')"></code></pre>
                     </div>
+                    <pre v-if="item.detail && shouldCollapseActivityDetail(item) && activityDetailParts(item.detail).result" class="activity-result">{{ activityDetailParts(item.detail).result }}</pre>
                   </div>
                 </div>
               </div>
