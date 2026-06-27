@@ -33,6 +33,7 @@ Movo has its own identity, UI, settings, and workflow layer. Under the hood, it 
 ## Table Of Contents
 
 - [Download](#download)
+- [Support Movo](#support-movo)
 - [Why Movo](#why-movo)
 - [Features](#features)
 - [Chat Workspace](#chat-workspace)
@@ -55,6 +56,38 @@ Use the direct links below to download the latest published installer. The [late
 | Linux | `.deb` | [Movo-Linux.deb](../../releases/latest/download/Movo-Linux.deb) | Shown on the [latest release](../../releases/latest) |
 
 Direct download links always point to the newest published release because the release workflow uploads stable asset names.
+
+## Support Movo
+
+If Movo helps you build faster, you can support the project. Donations are optional, but they help with development time, testing, packaging, documentation, and keeping Pinoox-focused workflows improving.
+
+### Crypto
+
+You can donate with TON-compatible wallets. This wallet address supports the TON network and TON-based assets such as TON and USDT on TON.
+
+```text
+UQBQwGiT0DbnWPvxuYa9EVYVVtniyDmzltBiVghOhozz-vJQ
+```
+
+Compatible donation options:
+
+- TON on the TON network.
+- USDT on the TON network.
+
+You can use Tonkeeper or any other wallet that supports the TON network. If the wallet link below does not open from GitHub, copy the address manually.
+
+[Donate with a TON wallet](ton://transfer/UQBQwGiT0DbnWPvxuYa9EVYVVtniyDmzltBiVghOhozz-vJQ)
+
+Please use only the TON network for this address. Do not send ERC20, TRC20, BSC, Polygon, or other network transfers to this wallet address.
+
+### Other Support Options
+
+Recommended options to add later:
+
+- GitHub Sponsors for international developers.
+- Buy Me a Coffee or Ko-fi for small one-time donations.
+- Open Collective for transparent community funding.
+- Local Iranian payment links for Rial/Toman support, if you have a trusted payment provider.
 
 ## Why Movo
 
