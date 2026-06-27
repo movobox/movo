@@ -33,6 +33,7 @@ export const useStudioStore = defineStore("studio", () => {
     | { kind: "text"; text: string }
     | { kind: "activity"; text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
   type RunState = {
+    turnId: string;
     isRunning: boolean;
     isStopping: boolean;
     stopRequested: boolean;
@@ -252,6 +253,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   function makeRunState(startedAt = Date.now()): RunState {
     return {
+      turnId: "",
       isRunning: false,
       isStopping: false,
       stopRequested: false,
@@ -461,7 +463,9 @@ export const useStudioStore = defineStore("studio", () => {
     chat.updatedAt = now();
     chat.draft = "";
     const runStartedAt = Date.now();
+    const turnId = uid();
     const runState = makeRunState(runStartedAt);
+    runState.turnId = turnId;
     runState.isRunning = true;
     runState.activities = [];
     runStates.value[chat.id] = runState;
@@ -474,10 +478,12 @@ export const useStudioStore = defineStore("studio", () => {
       const payload = {
         chat: clone(chat),
         message: buildPromptWithCommandContext(chat, promptText),
+        turnId,
         appSettings: clone(appSettings.value),
         extraFiles: allExtraFiles
       };
       const result = await window.studio.runMimo(payload);
+      if (runStates.value[chat.id]?.turnId !== turnId) return;
       const finalText = result.output.trim();
       const activityLog = formatRunActivities(runState.activities, Date.now() - runStartedAt);
       if (activityLog) chat.messages.push(makeMessage("system", activityLog));
@@ -512,9 +518,11 @@ export const useStudioStore = defineStore("studio", () => {
       await persistChats();
       await persistUiState();
     } catch (e) {
+      if (runStates.value[chat.id]?.turnId !== turnId) return;
       chat.messages.push(makeMessage("system", `Error: ${String(e)}`));
       schedulePersistence();
     } finally {
+      if (runStates.value[chat.id]?.turnId !== turnId) return;
       runState.isRunning = false;
       runState.isStopping = false;
       runState.stopRequested = false;
@@ -712,7 +720,7 @@ export const useStudioStore = defineStore("studio", () => {
     if (!runState?.isRunning || runState.isStopping) return;
     runState.stopRequested = true;
     runState.isStopping = true;
-    await window.studio.stopMimo({ chatId: chat.id });
+    await window.studio.stopMimo({ chatId: chat.id, turnId: runState.turnId });
   }
 
   function dismissInterrupted() {
@@ -1185,6 +1193,7 @@ export const useStudioStore = defineStore("studio", () => {
       const chatId = event.chatId || "";
       const runState = chatId ? runStates.value[chatId] : null;
       if (!chatId || !runState?.isRunning) return;
+      if (runState.turnId && event.turnId !== runState.turnId) return;
       const isActiveRun = activeChat.value?.id === chatId;
       if (event.type === "activity") {
         if (isNonRetryableEngineText(event.text) || isNonRetryableEngineText(event.detail || "")) {
@@ -1212,6 +1221,7 @@ export const useStudioStore = defineStore("studio", () => {
       const chatId = event.chatId || "";
       const runState = chatId ? runStates.value[chatId] : null;
       if (chatId && runState?.isRunning) {
+        if (runState.turnId && event.turnId !== runState.turnId) return;
         const exists = runState.pendingPermissions.some((p) => p.type === event.type && p.target === event.target);
         if (!exists) runState.pendingPermissions.push(event);
         pushRunActivity(chatId, `${translate("permRequested")}: ${event.type}`);
@@ -1222,6 +1232,7 @@ export const useStudioStore = defineStore("studio", () => {
     if (typeof window.studio.onMimoInterrupted === "function") {
       interruptedUnsubscribe = window.studio.onMimoInterrupted((event) => {
         const runState = ensureRunState(event.chatId);
+        if (runState.turnId && event.turnId !== runState.turnId) return;
         runState.interruptedRun = event;
         if (activeChat.value?.id === event.chatId) void nextTick(() => scrollMessages({ behavior: "smooth" }));
       });

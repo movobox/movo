@@ -412,6 +412,7 @@ let activeRunId = 0;
 const terminalProcesses = new Map<string, IPty>();
 const activeRuns = new Map<number, {
   chatId: string;
+  turnId?: string;
   cwd?: string;
   child?: ChildProcessWithoutNullStreams;
   retryTimer?: ReturnType<typeof setTimeout>;
@@ -893,7 +894,7 @@ ipcMain.handle("mimo:check", async () => {
   }
 });
 
-ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appSettings: AppSettings; extraFiles: string[] }) => {
+ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; turnId?: string; appSettings: AppSettings; extraFiles: string[] }) => {
   try {
     console.log("[main] mimo:run called, message:", payload.message);
     const args = ["run", "--format", "json", "--dangerously-skip-permissions"];
@@ -925,7 +926,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
     }
     console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
     const mimoEnv = buildMimoEnvironment(projectFolder, s, payload.chat?.id || "");
-    return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv, payload.chat?.id || "", payload.message || "");
+    return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv, payload.chat?.id || "", payload.message || "", payload.turnId || "");
   } catch (e) {
     console.error("[main] mimo:run error:", e);
     return { ok: false, code: -1, output: String(e) };
@@ -934,9 +935,9 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
 
 ipcMain.handle("mimo:sessions", () => runMimo(["session", "list"], process.cwd(), false, 0, "", 0, buildMimoEnvironment(process.cwd(), defaultAppSettings)));
 
-ipcMain.handle("mimo:stop", (_event, payload?: { chatId?: string }) => {
+ipcMain.handle("mimo:stop", (_event, payload?: { chatId?: string; turnId?: string }) => {
   const runIds = payload?.chatId
-    ? [latestRunByChat.get(payload.chatId)].filter((id): id is number => typeof id === "number")
+    ? [latestRunByChat.get(payload.turnId ? `${payload.chatId}:${payload.turnId}` : payload.chatId)].filter((id): id is number => typeof id === "number")
     : Array.from(activeRuns.keys());
   for (const runId of runIds) {
     stopRequestedRuns.add(runId);
@@ -1512,18 +1513,21 @@ function findMimoBinary(): string | null {
   return null;
 }
 
-function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0, envExtra: Record<string, string> = {}, chatId = "", runMessage = ""): Promise<{ ok: boolean; code: number; output: string }> {
+function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount = 0, accumulatedOutput = "", runId = 0, envExtra: Record<string, string> = {}, chatId = "", runMessage = "", turnId = ""): Promise<{ ok: boolean; code: number; output: string }> {
   if (!runId) {
     runId = ++activeRunId;
     stopRequestedRuns.delete(runId);
-    if (chatId) latestRunByChat.set(chatId, runId);
+    if (chatId) {
+      latestRunByChat.set(chatId, runId);
+      if (turnId) latestRunByChat.set(`${chatId}:${turnId}`, runId);
+    }
   }
   const binary = findMimoBinary();
   console.log("[mimo] binary:", binary, "args:", args, "cwd:", cwd);
   if (!binary) {
     const msg = "Movo engine not found. Install @mimo-ai/cli.";
     console.log("[mimo] ERROR:", msg);
-    if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stderr", text: msg });
+    if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "stderr", text: msg });
     return Promise.resolve({ ok: false, code: -1, output: msg });
   }
 
@@ -1575,6 +1579,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
     const runContext = activeRuns.get(runId) || { chatId };
     runContext.chatId = chatId || runContext.chatId || "";
+    runContext.turnId = turnId || runContext.turnId || "";
     runContext.cwd = cwd;
     runContext.cancel = () => resolve({ ok: false, code: -3, output: "" });
     activeRuns.set(runId, runContext);
@@ -1601,7 +1606,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     activeRuns.set(runId, runContext);
     let fullText = accumulatedOutput;
     let stderrText = "";
-    const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd, chatId, runId) : undefined;
+    const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd, chatId, turnId, runId) : undefined;
 
     console.log("[mimo] spawned pid:", child.pid, "retry:", retryCount);
 
@@ -1658,8 +1663,8 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       const delay = RETRY_DELAYS[retryCount] || 30000;
       console.log(`[mimo] retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}), code: ${code}`);
       if (streamToWindow) {
-        mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
-        mainWindow?.webContents.send("mimo:output", { chatId, type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
+        mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "activity", text: `Retrying... (${retryCount + 1}/${MAX_RETRIES})`, detail: `Connection issue, retrying in ${delay / 1000}s` });
+        mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "retrying", attempt: retryCount + 1, maxRetries: MAX_RETRIES, delay });
       }
       const retryTimer = setTimeout(() => {
         const retryRun = activeRuns.get(runId);
@@ -1670,7 +1675,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
           resolveInner?.({ ok: false, code: -3, output: fullText });
           return;
         }
-        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId, envExtra, chatId, runMessage).then((r) => {
+        resolve(runMimo(args, cwd, streamToWindow, retryCount + 1, fullText, runId, envExtra, chatId, runMessage, turnId).then((r) => {
           resolveInner?.(r);
           return r;
         }));
@@ -1683,6 +1688,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     if (code !== 0 && streamToWindow) {
       mainWindow?.webContents.send("mimo:interrupted", {
         chatId,
+        turnId,
         message: runMessage,
         code,
         stderr: (stderrText || (hasOutput ? "Response was interrupted before completion." : "")).slice(0, 500),
@@ -1693,6 +1699,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
 
     activeRuns.delete(runId);
     if (chatId && latestRunByChat.get(chatId) === runId) latestRunByChat.delete(chatId);
+    if (chatId && turnId && latestRunByChat.get(`${chatId}:${turnId}`) === runId) latestRunByChat.delete(`${chatId}:${turnId}`);
     resolveInner?.({ ok: code === 0, code, output: fullText || stderrText });
   };
   resolveInner = resolve;
@@ -1704,6 +1711,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       if (!settled && streamToWindow) {
         mainWindow?.webContents.send("mimo:output", {
           chatId,
+          turnId,
           type: "activity",
           text: "Still waiting for Movo...",
           detail: "Keeping the connection alive on a slow network"
@@ -1749,11 +1757,11 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
           }
 
           if (activity && streamToWindow) {
-            mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", ...activity, step: stepCount });
+            mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "activity", ...activity, step: stepCount });
           }
           if (text) {
             fullText += text;
-            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stdout", text });
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "stdout", text });
           }
           if (isCompletionEvent(event)) {
             finishRun(0, true);
@@ -1763,7 +1771,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
         } catch {
           lastEventTime = Date.now();
           if (!line.includes("<system-reminder>") && !line.includes("</system-reminder>") && !isIgnorableEngineNoise(line)) {
-            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, type: "stdout", text: line + "\n" });
+            if (streamToWindow) mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "stdout", text: line + "\n" });
             fullText += line + "\n";
           }
           markActivity();
@@ -1788,9 +1796,9 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
       console.log("[mimo] stderr:", t);
       const permMatch = t.match(/permission requested:\s*(\S+)\s*\(([^)]+)\)/);
       if (permMatch && streamToWindow) {
-        mainWindow?.webContents.send("mimo:permission", { chatId, type: permMatch[1], target: permMatch[2], raw: t });
+        mainWindow?.webContents.send("mimo:permission", { chatId, turnId, type: permMatch[1], target: permMatch[2], raw: t });
       } else if (streamToWindow) {
-        mainWindow?.webContents.send("mimo:output", { chatId, type: "activity", text: summarizeStderrActivity(t) });
+        mainWindow?.webContents.send("mimo:output", { chatId, turnId, type: "activity", text: summarizeStderrActivity(t) });
       }
       markActivity();
     });
@@ -1807,7 +1815,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   });
 }
 
-function createFileActivityWatcher(cwd: string, chatId: string, runId: number) {
+function createFileActivityWatcher(cwd: string, chatId: string, turnId: string, runId: number) {
   if (!cwd || !existsSync(cwd)) return undefined;
   let watcher: FSWatcher | undefined;
   const seen = new Map<string, number>();
@@ -1830,6 +1838,7 @@ function createFileActivityWatcher(cwd: string, chatId: string, runId: number) {
       const action = eventType === "rename" ? "Creating or moving file" : "Writing file";
       mainWindow?.webContents.send("mimo:output", {
         chatId,
+        turnId,
         type: "activity",
         text: `${action}: ${base}`,
         detail: [

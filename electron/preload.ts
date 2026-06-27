@@ -26,18 +26,18 @@ contextBridge.exposeInMainWorld("studio", {
   },
   listSessions: () => ipcRenderer.invoke("mimo:sessions"),
   stopMimo: (payload?: unknown) => ipcRenderer.invoke("mimo:stop", payload),
-  onMimoOutput: (callback: (event: { chatId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => void) => {
-    const handler = (_: unknown, data: { chatId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => callback(data);
+  onMimoOutput: (callback: (event: { chatId?: string; turnId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => void) => {
+    const handler = (_: unknown, data: { chatId?: string; turnId?: string; type: string; text: string; detail?: string; step?: number; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string; attempt?: number; maxRetries?: number; delay?: number }) => callback(data);
     ipcRenderer.on("mimo:output", handler);
     return () => ipcRenderer.removeListener("mimo:output", handler);
   },
-  onMimoInterrupted: (callback: (event: { chatId: string; message: string; code: number; stderr: string; attempt: number; maxRetries: number }) => void) => {
-    const handler = (_: unknown, data: { chatId: string; message: string; code: number; stderr: string; attempt: number; maxRetries: number }) => callback(data);
+  onMimoInterrupted: (callback: (event: { chatId: string; turnId?: string; message: string; code: number; stderr: string; attempt: number; maxRetries: number }) => void) => {
+    const handler = (_: unknown, data: { chatId: string; turnId?: string; message: string; code: number; stderr: string; attempt: number; maxRetries: number }) => callback(data);
     ipcRenderer.on("mimo:interrupted", handler);
     return () => ipcRenderer.removeListener("mimo:interrupted", handler);
   },
-  onMimoPermission: (callback: (event: { chatId?: string; type: string; target: string; raw: string }) => void) => {
-    const handler = (_: unknown, data: { chatId?: string; type: string; target: string; raw: string }) => callback(data);
+  onMimoPermission: (callback: (event: { chatId?: string; turnId?: string; type: string; target: string; raw: string }) => void) => {
+    const handler = (_: unknown, data: { chatId?: string; turnId?: string; type: string; target: string; raw: string }) => callback(data);
     ipcRenderer.on("mimo:permission", handler);
     return () => ipcRenderer.removeListener("mimo:permission", handler);
   },

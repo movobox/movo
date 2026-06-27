@@ -83,6 +83,7 @@ export type StudioSettings = {
 
 export type OutputEvent = {
   chatId?: string;
+  turnId?: string;
   type: string;
   text: string;
   detail?: string;
@@ -142,6 +143,7 @@ export type ProjectChanges = {
 
 export type PermissionEvent = {
   chatId?: string;
+  turnId?: string;
   type: string;
   target: string;
   raw: string;
@@ -149,6 +151,7 @@ export type PermissionEvent = {
 
 export type InterruptedEvent = {
   chatId: string;
+  turnId?: string;
   message: string;
   code: number;
   stderr: string;
@@ -181,11 +184,12 @@ declare global {
       runMimo: (payload: {
         chat: Chat;
         message: string;
+        turnId?: string;
         appSettings: AppSettings;
         extraFiles: string[];
       }) => Promise<{ ok: boolean; code: number; output: string }>;
       listSessions: () => Promise<{ ok: boolean; code: number; output: string }>;
-      stopMimo: (payload?: { chatId?: string }) => Promise<{ ok: boolean }>;
+      stopMimo: (payload?: { chatId?: string; turnId?: string }) => Promise<{ ok: boolean }>;
       onMimoOutput: (callback: (event: OutputEvent) => void) => () => void;
       onMimoInterrupted: (callback: (event: InterruptedEvent) => void) => () => void;
       onMimoPermission: (callback: (event: PermissionEvent) => void) => () => void;

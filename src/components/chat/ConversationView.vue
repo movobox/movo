@@ -9,6 +9,7 @@ import MessageContent from "./MessageContent.vue";
 const studio = useStudioStore();
 const { t } = useI18n();
 const imagePreview = ref<{ src: string; name: string; path: string } | null>(null);
+const copyMenuId = ref("");
 
 const queuedAsMessages = computed(() => {
   return studio.messageQueue.map((q) => ({ id: q.id, text: q.text }));
@@ -70,6 +71,20 @@ function openImagePreview(attachment: { path: string; name: string; previewUrl?:
 
 function closeImagePreview() {
   imagePreview.value = null;
+}
+
+function toggleCopyMenu(messageId: string) {
+  copyMenuId.value = copyMenuId.value === messageId ? "" : messageId;
+}
+
+function copyMessageText(text: string) {
+  studio.copyMessage(text);
+  copyMenuId.value = "";
+}
+
+function copyMessageId(id: string) {
+  studio.copyMessage(id);
+  copyMenuId.value = "";
 }
 
 async function enrichAttachment(attachment: { path: string; name: string; kind: "image" | "binary"; mime: string; size: number; previewUrl?: string; filePreviewUrl?: string }) {
@@ -229,9 +244,15 @@ function activityOpenPath(detail = "") {
                 <button v-if="message.role === 'user'" class="msg-action-btn" type="button" :title="t('editMsg')" @click="studio.startEdit(message)">
                   <Pencil :size="12" />
                 </button>
-                <button class="msg-action-btn" type="button" :title="t('copyMsg')" @click="studio.copyMessage(message.text)">
-                  <Copy :size="12" />
-                </button>
+                <div class="msg-copy-menu-wrap">
+                  <button class="msg-action-btn" type="button" :title="t('copyMsg')" @click="toggleCopyMenu(message.id)">
+                    <Copy :size="12" />
+                  </button>
+                  <div v-if="copyMenuId === message.id" class="msg-copy-menu">
+                    <button type="button" @click="copyMessageText(message.text)">Copy message</button>
+                    <button type="button" @click="copyMessageId(message.id)">Copy ID</button>
+                  </div>
+                </div>
                 <button
                   v-if="msgIdx < (studio.activeChat?.messages.length || 0) - 1"
                   class="msg-action-btn revert"
