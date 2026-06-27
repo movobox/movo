@@ -1471,13 +1471,32 @@ function parseVisibleActivityDetail(detail: string): { target?: string; result?:
   if (!clean) return null;
   const target = clean.match(/^Target:\s*(.+)$/im)?.[1]?.trim();
   const resultMatch = clean.match(/(?:^|\n)Result:\s*\n?([\s\S]*)$/i);
-  const result = resultMatch?.[1]?.trim();
+  const result = formatVisibleActivityResult(resultMatch?.[1]?.trim() || "");
   const extra = clean
     .replace(/^Target:\s*.+$/im, "")
     .replace(/(?:^|\n)Result:\s*\n?[\s\S]*$/i, "")
     .trim();
   if (!target && !result && !extra) return null;
   return { target, result, extra };
+}
+
+function formatVisibleActivityResult(result: string) {
+  if (!result) return "";
+  if (isPlainWriteSuccessResult(result)) return "";
+  return result;
+}
+
+function isPlainWriteSuccessResult(result: string) {
+  const clean = stripAnsi(result).trim();
+  if (/^Wrote file successfully\.?$/i.test(clean)) return true;
+  try {
+    const parsed = JSON.parse(clean);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = String((parsed as Record<string, unknown>).value || "").trim();
+      return /^Wrote file successfully\.?$/i.test(value);
+    }
+  } catch {}
+  return false;
 }
 
 function extToCodeLang(filePath: string): string {

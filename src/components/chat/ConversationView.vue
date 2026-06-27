@@ -118,7 +118,7 @@ function activityDetailParts(detail = "") {
   const target = detail.match(/^Target:\s*(.+)$/im)?.[1]?.trim() || "";
   const path = detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "";
   const detected = /Detected from project file changes while Movo is running/i.test(detail);
-  const result = detail.match(/(?:^|\n)Result:\s*\n?([\s\S]*)$/i)?.[1]?.trim() || "";
+  const result = formatVisibleActivityResult(detail.match(/(?:^|\n)Result:\s*\n?([\s\S]*)$/i)?.[1]?.trim() || "");
   const extra = detail
     .replace(/^Target:\s*.+$/im, "")
     .replace(/^Path:\s*.+$/im, "")
@@ -126,6 +126,19 @@ function activityDetailParts(detail = "") {
     .replace(/(?:^|\n)Result:\s*\n?[\s\S]*$/i, "")
     .trim();
   return { target, path, detected, result, extra };
+}
+
+function formatVisibleActivityResult(result: string) {
+  if (!result) return "";
+  if (/^Wrote file successfully\.?$/i.test(result.trim())) return "";
+  try {
+    const parsed = JSON.parse(result);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = String((parsed as Record<string, unknown>).value || "").trim();
+      if (/^Wrote file successfully\.?$/i.test(value)) return "";
+    }
+  } catch {}
+  return result;
 }
 
 function activityOpenPath(detail = "") {
