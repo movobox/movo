@@ -412,6 +412,7 @@ let activeRunId = 0;
 const terminalProcesses = new Map<string, IPty>();
 const activeRuns = new Map<number, {
   chatId: string;
+  cwd?: string;
   child?: ChildProcessWithoutNullStreams;
   retryTimer?: ReturnType<typeof setTimeout>;
   cancel?: () => void;
@@ -1572,6 +1573,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   return new Promise<{ ok: boolean; code: number; output: string }>((resolve) => {
     const runContext = activeRuns.get(runId) || { chatId };
     runContext.chatId = chatId || runContext.chatId || "";
+    runContext.cwd = cwd;
     runContext.cancel = () => resolve({ ok: false, code: -3, output: "" });
     activeRuns.set(runId, runContext);
     if (stopRequestedRuns.has(runId)) {
@@ -1597,7 +1599,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
     activeRuns.set(runId, runContext);
     let fullText = accumulatedOutput;
     let stderrText = "";
-    const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd) : undefined;
+    const fileActivityWatcher = streamToWindow ? createFileActivityWatcher(cwd, chatId, runId) : undefined;
 
     console.log("[mimo] spawned pid:", child.pid, "retry:", retryCount);
 
@@ -1803,7 +1805,7 @@ function runMimo(args: string[], cwd: string, streamToWindow = true, retryCount 
   });
 }
 
-function createFileActivityWatcher(cwd: string) {
+function createFileActivityWatcher(cwd: string, chatId: string, runId: number) {
   if (!cwd || !existsSync(cwd)) return undefined;
   let watcher: FSWatcher | undefined;
   const seen = new Map<string, number>();
@@ -1819,9 +1821,13 @@ function createFileActivityWatcher(cwd: string) {
       const nowTs = Date.now();
       const last = seen.get(rel) || 0;
       if (nowTs - last < 1500) return;
+      const sameFolderRuns = Array.from(activeRuns.entries())
+        .filter(([id, run]) => id !== runId && run.child && run.cwd && resolve(run.cwd) === resolve(cwd));
+      if (sameFolderRuns.length > 0) return;
       seen.set(rel, nowTs);
       const action = eventType === "rename" ? "Creating or moving file" : "Writing file";
       mainWindow?.webContents.send("mimo:output", {
+        chatId,
         type: "activity",
         text: `${action}: ${base}`,
         detail: [

@@ -1182,7 +1182,7 @@ export const useStudioStore = defineStore("studio", () => {
     await checkCli();
     await loadProjectFiles();
     outputUnsubscribe = window.studio.onMimoOutput((event) => {
-      const chatId = event.chatId || activeChat.value?.id || "";
+      const chatId = event.chatId || "";
       const runState = chatId ? runStates.value[chatId] : null;
       if (!chatId || !runState?.isRunning) return;
       const isActiveRun = activeChat.value?.id === chatId;
@@ -1209,7 +1209,7 @@ export const useStudioStore = defineStore("studio", () => {
       }
     });
     permissionUnsubscribe = window.studio.onMimoPermission((event) => {
-      const chatId = event.chatId || activeChat.value?.id || "";
+      const chatId = event.chatId || "";
       const runState = chatId ? runStates.value[chatId] : null;
       if (chatId && runState?.isRunning) {
         const exists = runState.pendingPermissions.some((p) => p.type === event.type && p.target === event.target);
