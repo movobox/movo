@@ -1763,6 +1763,32 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   transition: background 0.08s;
 }
 .dropdown button:hover { background: #27272a; }
+.dropdown button.agent-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 240px;
+  height: auto;
+  padding: 8px;
+}
+.agent-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-option strong {
+  color: #e4e4e7;
+  font-size: 12px;
+  font-weight: 700;
+}
+.agent-option small {
+  max-width: 220px;
+  color: #71717a;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
 
 .send-btn {
   display: grid;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, File, FileJson, GitFork, ImageIcon, Paperclip, Pencil, Play, Square, Trash2, Upload, X } from "@lucide/vue";
+import { Bot, Bug, ChevronDown, CircleHelp, File, FileJson, GitFork, ImageIcon, Lightbulb, Paperclip, Pencil, Play, Square, Trash2, Upload, Wrench, X } from "@lucide/vue";
 import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
@@ -12,6 +12,16 @@ const composerInput = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const mentionTooltip = ref({ visible: false, text: "", x: 0, y: 0 });
 const imagePreview = ref<{ src: string; name: string; path: string } | null>(null);
+const agentOptions = [
+  { value: "build", label: "Agent", description: "General coding and project work.", icon: Bot },
+  { value: "ask", label: "Ask", description: "Answer questions and inspect context without editing.", icon: CircleHelp },
+  { value: "debugger", label: "Debug", description: "Trace errors, logs, failing tests, and runtime issues.", icon: Bug },
+  { value: "plan", label: "Plan", description: "Create an implementation plan before changing files.", icon: Lightbulb },
+  { value: "compose", label: "Compose", description: "Draft text, docs, prompts, and structured content.", icon: Pencil },
+  { value: "pinoox", label: "Pinoox", description: "Auto-select the right Pinoox workflow and role.", icon: Wrench }
+];
+
+const currentAgentOption = computed(() => agentOptions.find((option) => option.value === studio.appSettings.agent) || agentOptions[0]);
 
 function onDragOver(e: DragEvent) {
   e.preventDefault();
@@ -560,13 +570,24 @@ function formatSize(bytes: number) {
 
         <div class="dropdown-wrap">
           <button class="sel-btn" type="button" @click.stop="studio.showAgentMenu = !studio.showAgentMenu">
-            {{ studio.appSettings.agent }} <ChevronDown :size="12" />
+            <component :is="currentAgentOption.icon" :size="13" />
+            {{ currentAgentOption.label }} <ChevronDown :size="12" />
           </button>
           <div v-if="studio.showAgentMenu" class="dropdown" @click.stop>
-            <button type="button" @click="studio.selectAgent('build')">{{ t("build") }}</button>
-            <button type="button" @click="studio.selectAgent('plan')">{{ t("plan") }}</button>
-            <button type="button" @click="studio.selectAgent('compose')">{{ t("compose") }}</button>
-            <button type="button" @click="studio.selectAgent('pinoox')">Pinoox</button>
+            <button
+              v-for="option in agentOptions"
+              :key="option.value"
+              class="agent-option"
+              type="button"
+              :title="option.description"
+              @click="studio.selectAgent(option.value)"
+            >
+              <component :is="option.icon" :size="14" />
+              <span>
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.description }}</small>
+              </span>
+            </button>
           </div>
         </div>
 

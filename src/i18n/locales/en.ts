@@ -24,7 +24,7 @@ export default {
   model: "Model",
   modelHint: "MiMo Auto",
   agent: "Agent",
-  build: "Build",
+  build: "Agent",
   plan: "Plan",
   compose: "Compose",
   trust: "Trust this workspace",

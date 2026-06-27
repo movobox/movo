@@ -24,7 +24,7 @@ export default {
   model: "مدل",
   modelHint: "MiMo Auto",
   agent: "Agent",
-  build: "Build",
+  build: "Agent",
   plan: "Plan",
   compose: "Compose",
   trust: "اعتماد به فولدر",

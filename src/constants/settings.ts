@@ -42,6 +42,12 @@ const defaultAgents = {
     temperature: 0.2,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
+  ask: {
+    description: "Answer questions, explain code, and inspect context without making changes unless explicitly asked.",
+    mode: "subagent",
+    temperature: 0.2,
+    permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
   architect: {
     description: "Plan architecture, data flow, boundaries, and migration steps before broad changes.",
     mode: "subagent",

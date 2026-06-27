@@ -9,6 +9,15 @@ import { useStudioStore } from "../../stores/studio";
 const studio = useStudioStore();
 const language = useLanguageStore();
 const { t } = useI18n();
+const agentOptions = [
+  { value: "build", label: "Agent", description: "General coding and project work." },
+  { value: "ask", label: "Ask", description: "Answer questions and inspect context without editing." },
+  { value: "debugger", label: "Debug", description: "Trace errors, logs, failing tests, and runtime issues." },
+  { value: "plan", label: "Plan", description: "Create an implementation plan before changing files." },
+  { value: "compose", label: "Compose", description: "Draft text, docs, prompts, and structured content." },
+  { value: "pinoox", label: "Pinoox", description: "Auto-select the right Pinoox workflow and role." }
+];
+const selectedAgentDescription = computed(() => agentOptions.find((option) => option.value === studio.appSettings.agent)?.description || "");
 
 const activeSection = ref("general");
 const sections = computed(() => [
@@ -95,11 +104,11 @@ function setLanguageFromSelect(event: Event) {
               <label class="field">
                 <span>{{ t("agent") }}</span>
                 <select v-model="studio.appSettings.agent">
-                  <option value="build">{{ t("build") }}</option>
-                  <option value="plan">{{ t("plan") }}</option>
-                  <option value="compose">{{ t("compose") }}</option>
-                  <option value="pinoox">Pinoox</option>
+                  <option v-for="option in agentOptions" :key="option.value" :value="option.value" :title="option.description">
+                    {{ option.label }}
+                  </option>
                 </select>
+                <small>{{ selectedAgentDescription }}</small>
               </label>
               <label class="field">
                 <span>{{ t("providerOptions") }}</span>
