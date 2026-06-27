@@ -44,6 +44,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Clean previous release output
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force upload -ErrorAction SilentlyContinue
+
       - name: Build production installer
         run: npm run ${{ matrix.script }}
 

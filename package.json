@@ -64,14 +64,15 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "requestedExecutionLevel": "requireAdministrator",
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "Movo-Setup-Windows.${ext}",
       "target": [
         "nsis"
       ]
     },
     "nsis": {
       "oneClick": false,
-      "perMachine": true,
+      "perMachine": false,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
