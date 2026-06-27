@@ -26,6 +26,10 @@
   <img alt="Pinoox" src="https://img.shields.io/badge/Pinoox-ready-7c3aed?style=flat-square">
 </p>
 
+<p align="center">
+  <img src="docs/assets/movo-preview.png" alt="Movo desktop preview">
+</p>
+
 Movo is a focused desktop workspace for building and maintaining software with AI. It combines a project-aware chat, real terminals, live activity logs, file mentions, attachments, dev servers, agents, MCP integrations, and Pinoox workflows in one app.
 
 Movo has its own identity, UI, settings, and workflow layer. Under the hood, it is powered in part by Xiaomi's MiMo Code engine for AI coding execution.
@@ -33,6 +37,7 @@ Movo has its own identity, UI, settings, and workflow layer. Under the hood, it 
 ## Table Of Contents
 
 - [Download](#download)
+- [Preview](#preview)
 - [Support Movo](#support-movo)
 - [Why Movo](#why-movo)
 - [Features](#features)
@@ -57,6 +62,13 @@ Use the direct links below to download the latest published installer. The [late
 | Linux | `.deb` | [Movo-Linux.deb](../../releases/latest/download/Movo-Linux.deb) | Shown on the [latest release](../../releases/latest) |
 
 Direct download links always point to the newest published release because the release workflow uploads stable asset names.
+
+## Preview
+
+Movo shows the full workflow in one place: project chats, live activity steps, file operations, Markdown-rich output, and the composer with agent and session tools.
+
+[Open the full-size preview](docs/assets/movo-preview.png)
+
 
 ## Support Movo
 
