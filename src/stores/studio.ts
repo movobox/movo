@@ -116,6 +116,7 @@ export const useStudioStore = defineStore("studio", () => {
   const hasAnyRunningChat = computed(() => Object.values(runStates.value).some((state) => state.isRunning));
   const isAgentCommandActive = computed(() => pendingPermissions.value.some((permission) => ["bash", "shell", "command"].includes(permission.type.toLowerCase())));
   const projectRoot = computed(() => activeChat.value?.folder || chats.value.find((chat) => chat.folder)?.folder || "");
+  const activeFolderTrusted = computed(() => isFolderTrusted(activeChat.value?.folder || ""));
   const activeDraft = computed({
     get: () => activeChat.value?.draft || "",
     set: (value: string) => {
@@ -163,9 +164,36 @@ export const useStudioStore = defineStore("studio", () => {
     return Array.from(groups.entries()).map(([folder, items]) => ({
       folder,
       name: folder === noProject ? folder : folder.split(/[\\/]/).filter(Boolean).pop() || folder,
+      trusted: folder !== noProject && isFolderTrusted(folder),
       items
     }));
   });
+
+  function normalizeFolderKey(folder: string) {
+    return folder.trim();
+  }
+
+  function isFolderTrusted(folder: string) {
+    const key = normalizeFolderKey(folder);
+    return Boolean(key && appSettings.value.trustedWorkspaces?.[key]);
+  }
+
+  async function setFolderTrust(folder: string, trusted: boolean) {
+    const key = normalizeFolderKey(folder);
+    if (!key || key === translate("noProject")) return;
+    appSettings.value.trustedWorkspaces = { ...(appSettings.value.trustedWorkspaces || {}) };
+    if (trusted) appSettings.value.trustedWorkspaces[key] = true;
+    else delete appSettings.value.trustedWorkspaces[key];
+    appSettings.value.trustWorkspace = false;
+    await saveAppSettings();
+    if (trusted) {
+      await window.studio.saveProjectConfig({ folder: key, appSettings: clone(appSettings.value) });
+    }
+  }
+
+  async function toggleFolderTrust(folder: string) {
+    await setFolderTrust(folder, !isFolderTrusted(folder));
+  }
 
   function schedulePersistence() {
     scheduleChatsSave();
@@ -312,11 +340,11 @@ export const useStudioStore = defineStore("studio", () => {
     if (!folder) return;
     if (!activeChat.value) startNewChat(folder);
     else activeChat.value.folder = folder;
-    const existingConfig = await window.studio.readProjectConfig(folder);
-    if (existingConfig.ok && existingConfig.raw) {
-      appSettings.value = settingsFromProjectConfig(existingConfig.config);
-    }
-    if (appSettings.value.trustWorkspace) {
+    if (isFolderTrusted(folder)) {
+      const existingConfig = await window.studio.readProjectConfig(folder);
+      if (existingConfig.ok && existingConfig.raw) {
+        appSettings.value = settingsFromProjectConfig(existingConfig.config);
+      }
       await window.studio.saveProjectConfig({ folder, appSettings: clone(appSettings.value) });
     }
     await loadProjectFiles();
@@ -340,7 +368,7 @@ export const useStudioStore = defineStore("studio", () => {
 
   async function saveAppSettings() {
     await window.studio.saveSettings(clone(appSettings.value));
-    if (appSettings.value.trustWorkspace && activeChat.value?.folder) {
+    if (activeChat.value?.folder && isFolderTrusted(activeChat.value.folder)) {
       await window.studio.saveProjectConfig({ folder: activeChat.value.folder, appSettings: clone(appSettings.value) });
     }
   }
@@ -1225,6 +1253,7 @@ export const useStudioStore = defineStore("studio", () => {
     hasRunningTerminal,
     isAgentCommandActive,
     projectRoot,
+    activeFolderTrusted,
     activeDraft,
     draftDir,
     messageQueue,
@@ -1232,6 +1261,8 @@ export const useStudioStore = defineStore("studio", () => {
     chatSizeInfo,
     projectGroups,
     chatRunStatus,
+    isFolderTrusted,
+    toggleFolderTrust,
     lineDir,
     relativeTime,
     updateScrollState,

@@ -42,6 +42,7 @@ export type AppSettings = {
   provider: string;
   agent: string;
   trustWorkspace: boolean;
+  trustedWorkspaces: Record<string, boolean>;
   skipPermissions: boolean;
   theme: string;
   projectConfigDir: string;

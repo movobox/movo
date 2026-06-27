@@ -333,6 +333,7 @@ export const defaultSettings: AppSettings = {
   provider: "",
   agent: "build",
   trustWorkspace: false,
+  trustedWorkspaces: {},
   skipPermissions: false,
   theme: "dark",
   projectConfigDir: ".movo",
@@ -361,6 +362,8 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
   return {
     ...defaultSettings,
     ...value,
+    trustWorkspace: false,
+    trustedWorkspaces: normalizeTrustedWorkspaces(value.trustedWorkspaces),
     permissions: { ...defaultSettings.permissions, ...(value.permissions || {}) },
     checkpoint: { ...defaultSettings.checkpoint, ...(value.checkpoint || {}) },
     memory: { ...defaultSettings.memory, ...(value.memory || {}) },
@@ -416,6 +419,11 @@ function withDefaultObject(raw: string, defaults: Record<string, unknown>): stri
   } catch {
     return raw || JSON.stringify(defaults, null, 2);
   }
+}
+
+function normalizeTrustedWorkspaces(value?: Record<string, boolean>): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([folder, trusted]) => folder && trusted === true));
 }
 
 function normalizeSelectableAgentModes(raw: string): string {

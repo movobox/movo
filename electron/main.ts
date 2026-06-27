@@ -14,6 +14,7 @@ type AppSettings = {
   provider: string;
   agent: string;
   trustWorkspace: boolean;
+  trustedWorkspaces: Record<string, boolean>;
   skipPermissions: boolean;
   theme: string;
   projectConfigDir: string;
@@ -389,6 +390,7 @@ const ENGINE_ENV_PREFIX = `${"MIMO"}CODE`;
 const defaultAppSettings: AppSettings = {
   language: "en", model: "", provider: "", agent: "build",
   trustWorkspace: false, skipPermissions: false, theme: "dark",
+  trustedWorkspaces: {},
   projectConfigDir: MOVO_PROJECT_CONFIG_DIR,
   permissions: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
   checkpoint: { enabled: true }, memory: { enabled: true },
@@ -459,7 +461,14 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
   settings.instructionsJson = withoutDefaultInstructions(value.instructionsJson || defaultAppSettings.instructionsJson);
   settings.providerJson = value.providerJson || defaultAppSettings.providerJson;
   settings.projectConfigDir = normalizeProjectConfigDir(value.projectConfigDir);
+  settings.trustWorkspace = false;
+  settings.trustedWorkspaces = normalizeTrustedWorkspaces(value.trustedWorkspaces);
   return settings;
+}
+
+function normalizeTrustedWorkspaces(value?: Record<string, boolean>) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([folder, trusted]) => folder && trusted === true));
 }
 
 function withDefaultSkills(raw: string) {
@@ -1072,7 +1081,8 @@ function engineDatabasePath() {
 }
 
 function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
-  const config = buildEngineConfig(projectFolder, appSettings, appSettings.trustWorkspace);
+  const trusted = isProjectTrusted(appSettings, projectFolder);
+  const config = buildEngineConfig(projectFolder, appSettings, trusted);
   const env: Record<string, string> = {
     [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot(),
     [`${ENGINE_ENV_PREFIX}_DB`]: engineDatabasePath(),
@@ -1080,6 +1090,12 @@ function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): 
     [`${ENGINE_ENV_PREFIX}_DISABLE_PROJECT_CONFIG`]: "true"
   };
   return env;
+}
+
+function isProjectTrusted(appSettings: AppSettings, folder: string) {
+  if (!folder) return false;
+  const normalized = resolve(folder);
+  return Boolean(appSettings.trustedWorkspaces?.[normalized] || appSettings.trustedWorkspaces?.[folder]);
 }
 
 function safeFileName(value: string) {
@@ -1292,7 +1308,7 @@ function buildEngineConfig(folder: string, appSettings: AppSettings, includeProj
 }
 
 function writeProjectConfig(folder: string, appSettings: AppSettings) {
-  if (!appSettings.trustWorkspace) return;
+  if (!isProjectTrusted(appSettings, folder)) return;
   const file = projectConfigPathForSettings(folder, appSettings);
   if (!file) return;
   mkdirSync(dirname(file), { recursive: true });

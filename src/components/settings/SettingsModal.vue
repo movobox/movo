@@ -82,8 +82,13 @@ function setLanguageFromSelect(event: Event) {
 
               <div class="toggles">
                 <label class="toggle-row">
-                  <input v-model="studio.appSettings.trustWorkspace" type="checkbox" />
-                  <span>{{ t("trust") }}</span>
+                  <input
+                    :checked="studio.activeFolderTrusted"
+                    :disabled="!studio.activeChat?.folder"
+                    type="checkbox"
+                    @change="studio.activeChat?.folder && studio.toggleFolderTrust(studio.activeChat.folder)"
+                  />
+                  <span>{{ t("trust") }}<small>Applies only to the current folder.</small></span>
                 </label>
                 <label class="toggle-row">
                   <input v-model="studio.appSettings.watcher.enabled" type="checkbox" />

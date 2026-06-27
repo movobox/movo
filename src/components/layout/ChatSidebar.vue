@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Folder, FolderOpen, Pencil, Plus, Settings, Trash2 } from "@lucide/vue";
+import { Folder, FolderOpen, Pencil, Plus, Settings, ShieldCheck, ShieldOff, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 
@@ -17,8 +17,21 @@ const { t } = useI18n();
     <section class="session-list">
       <div v-for="group in studio.projectGroups" :key="group.folder" class="session-group">
         <div class="group-label">
-          <Folder :size="14" />
-          <span>{{ group.name }}</span>
+          <div class="group-title">
+            <Folder :size="14" />
+            <span>{{ group.name }}</span>
+          </div>
+          <button
+            v-if="group.folder !== t('noProject')"
+            class="folder-trust-btn"
+            :class="{ trusted: group.trusted }"
+            type="button"
+            :title="group.trusted ? 'Disable trust for this folder' : 'Trust this folder'"
+            @click.stop="studio.toggleFolderTrust(group.folder)"
+          >
+            <component :is="group.trusted ? ShieldCheck : ShieldOff" :size="12" />
+            <span>{{ group.trusted ? 'Trusted' : 'Trust' }}</span>
+          </button>
         </div>
 
         <div v-for="chat in group.items" :key="chat.id" class="session-row">
