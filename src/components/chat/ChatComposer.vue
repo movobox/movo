@@ -566,6 +566,7 @@ function formatSize(bytes: number) {
             <button type="button" @click="studio.selectAgent('build')">{{ t("build") }}</button>
             <button type="button" @click="studio.selectAgent('plan')">{{ t("plan") }}</button>
             <button type="button" @click="studio.selectAgent('compose')">{{ t("compose") }}</button>
+            <button type="button" @click="studio.selectAgent('pinoox')">Pinoox</button>
           </div>
         </div>
 

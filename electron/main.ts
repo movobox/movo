@@ -134,6 +134,12 @@ const defaultAgents = {
     mode: "subagent",
     temperature: 0.15,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
+  pinoox: {
+    description: "Unified Pinoox agent that auto-selects architecture, app, migration, UI, security, docs, or marketplace behavior.",
+    mode: "subagent",
+    temperature: 0.15,
+    permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
   }
 };
 
@@ -196,10 +202,9 @@ const defaultCommands = {
     template: "Use context7 MCP for Laravel documentation. Focus on the Laravel version and packages used in this project when detectable. Task: $ARGUMENTS"
   },
   pinoox: {
-    description: "Use Pinoox docs and MCP tooling",
-    agent: "framework",
-    subtask: true,
-    template: "Use the pinoox MCP server and official Pinoox docs for framework-specific guidance. Inspect project routes, config, models, migrations, and logs when useful. Task: $ARGUMENTS"
+    description: "Use the unified Pinoox agent",
+    agent: "pinoox",
+    template: "Act as the unified Pinoox agent from pinoox/agent-pack. Auto-select the right behavior: architect, single-app builder, app builder, migration builder, UI builder, security reviewer, docs writer, or marketplace publisher. Detect platform vs single-app Pinx shape, use pinoox-mcp when available, avoid editing vendor/pinoox/pincore for app work, and handle: $ARGUMENTS"
   },
   vue: {
     description: "Use Vue docs through Context7 MCP",

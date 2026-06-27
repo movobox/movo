@@ -98,6 +98,7 @@ function setLanguageFromSelect(event: Event) {
                   <option value="build">{{ t("build") }}</option>
                   <option value="plan">{{ t("plan") }}</option>
                   <option value="compose">{{ t("compose") }}</option>
+                  <option value="pinoox">Pinoox</option>
                 </select>
               </label>
               <label class="field">
