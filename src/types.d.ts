@@ -104,6 +104,17 @@ export type TerminalSession = {
   exitCode: number | null;
 };
 
+export type DevServerSession = {
+  id: string;
+  name: string;
+  command: string;
+  cwd: string;
+  terminalId: string;
+  status: "starting" | "running" | "stopped";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TerminalDataEvent = {
   terminalId: string;
   data: string;

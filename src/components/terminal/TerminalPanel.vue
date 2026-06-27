@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ExternalLink, Maximize2, PanelRightClose, PanelTopOpen, Plus, Square, Trash2, X } from "@lucide/vue";
+import { ExternalLink, Maximize2, PanelRightClose, PanelTopOpen, Play, Plus, Server, Square, Trash2, X } from "@lucide/vue";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <button class="term-icon-btn" type="button" :title="t('newTerminal')" @click="studio.createTerminal">
+      <button class="term-icon-btn" type="button" :title="t('newTerminal')" @click="() => studio.createTerminal()">
         <Plus :size="14" />
       </button>
       <button class="term-icon-btn" type="button" :title="studio.terminalFloating ? 'Dock terminal' : 'Float terminal'" @click="toggleFloating">
@@ -239,6 +239,55 @@ onBeforeUnmount(() => {
         <X :size="14" />
       </button>
     </div>
+
+    <section class="dev-servers">
+      <div class="dev-servers-head">
+        <div class="dev-servers-title">
+          <Server :size="14" />
+          <span>Dev Servers</span>
+        </div>
+        <span class="dev-servers-subtitle">Run any project server from this folder.</span>
+      </div>
+
+      <div class="dev-server-presets">
+        <button
+          v-for="preset in studio.devServerPresets"
+          :key="preset.command"
+          class="dev-preset"
+          type="button"
+          :title="preset.hint"
+          @click="studio.applyDevServerPreset(preset.command, preset.name)"
+        >
+          {{ preset.name }}
+        </button>
+      </div>
+
+      <form class="dev-server-form" @submit.prevent="studio.startDevServer()">
+        <input v-model="studio.devServerDraftName" type="text" placeholder="Name" />
+        <input v-model="studio.devServerDraftCommand" class="dev-command-input" type="text" placeholder="npm run dev / php artisan serve / python manage.py runserver" />
+        <button class="dev-start-btn" type="submit" :disabled="!studio.devServerDraftCommand.trim() || !studio.projectRoot">
+          <Play :size="13" />
+          Start
+        </button>
+      </form>
+
+      <div v-if="studio.devServerSessions.length" class="dev-server-list">
+        <div v-for="server in studio.devServerSessions" :key="server.id" class="dev-server-item" :class="server.status">
+          <button class="dev-server-main" type="button" @click="studio.focusDevServer(server.id)">
+            <span class="dev-server-dot"></span>
+            <span class="dev-server-name">{{ server.name }}</span>
+            <code>{{ server.command }}</code>
+          </button>
+          <span class="dev-server-status">{{ server.status }}</span>
+          <button v-if="server.status !== 'stopped'" class="term-icon-btn" type="button" title="Stop server" @click="studio.stopDevServer(server.id)">
+            <Square :size="12" />
+          </button>
+          <button class="term-icon-btn" type="button" title="Remove" @click="studio.removeDevServer(server.id)">
+            <X :size="12" />
+          </button>
+        </div>
+      </div>
+    </section>
 
     <div class="term-workspace">
       <div

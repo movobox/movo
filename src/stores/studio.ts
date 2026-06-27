@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import pkg from "../../package.json";
 import { normalizeAppSettings } from "../constants/settings";
 import { translate } from "../i18n";
-import type { AppSettings, Chat, ChatAttachment, ChatMessage, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
+import type { AppSettings, Chat, ChatAttachment, ChatMessage, DevServerSession, InterruptedEvent, PermissionEvent, ProjectFile, QueuedMessage, TerminalExitEvent, TerminalSession } from "../types";
 import { clone, lineDir, makeChat, makeMessage, normalizeChat, now, relativeTime, uid } from "../utils/chat";
 import { highlightCode } from "../utils/highlight";
 import { useLanguageStore } from "./language";
@@ -21,6 +21,8 @@ export const useStudioStore = defineStore("studio", () => {
   const activeChatId = ref("");
   type TerminalScope = { sessions: TerminalSession[]; activeId: string };
   const terminalScopes = ref<Record<string, TerminalScope>>({});
+  type DevServerScope = { sessions: DevServerSession[]; draftName: string; draftCommand: string };
+  const devServerScopes = ref<Record<string, DevServerScope>>({});
   const cliStatus = ref<CliStatus>({ installed: false, version: "", checked: false });
   const showSettings = ref(false);
   const showTerminal = ref(false);
@@ -83,7 +85,21 @@ export const useStudioStore = defineStore("studio", () => {
   function findTerminalScope(terminalId: string) {
     return Object.values(terminalScopes.value).find((scope) => scope.sessions.some((terminal) => terminal.id === terminalId)) || null;
   }
+  function currentDevServerScope() {
+    const key = terminalScopeKey.value;
+    if (!devServerScopes.value[key]) devServerScopes.value[key] = { sessions: [], draftName: "", draftCommand: "" };
+    return devServerScopes.value[key];
+  }
   const terminalSessions = computed(() => currentTerminalScope().sessions);
+  const devServerSessions = computed(() => currentDevServerScope().sessions);
+  const devServerDraftName = computed({
+    get: () => currentDevServerScope().draftName,
+    set: (value: string) => { currentDevServerScope().draftName = value; }
+  });
+  const devServerDraftCommand = computed({
+    get: () => currentDevServerScope().draftCommand,
+    set: (value: string) => { currentDevServerScope().draftCommand = value; }
+  });
   function currentDraftAttachments() {
     const key = attachmentScopeKey.value;
     if (!attachmentScopes.value[key]) attachmentScopes.value[key] = [];
@@ -109,6 +125,7 @@ export const useStudioStore = defineStore("studio", () => {
   const activeTerminal = computed(() => terminalSessions.value.find((terminal) => terminal.id === activeTerminalId.value) || null);
   const runningTerminals = computed(() => terminalSessions.value.filter((terminal) => terminal.running));
   const hasRunningTerminal = computed(() => runningTerminals.value.length > 0);
+  const devServerPresets = computed(() => buildDevServerPresets(projectFiles.value));
   const activeRunState = computed(() => activeChat.value ? runStates.value[activeChat.value.id] || null : null);
   const isRunning = computed(() => Boolean(activeRunState.value?.isRunning));
   const isStopping = computed(() => Boolean(activeRunState.value?.isStopping));
@@ -458,7 +475,8 @@ export const useStudioStore = defineStore("studio", () => {
     const promptText = withAttachmentContext(requestText, outgoingAttachments);
     droppedFiles.value = [];
     draftAttachments.value = [];
-    chat.messages.push(makeMessage("user", requestText, outgoingAttachments));
+    const userMessage = makeMessage("user", requestText, outgoingAttachments);
+    chat.messages.push(userMessage);
     if (chat.messages.length === 1) chat.title = requestText.slice(0, 56);
     chat.updatedAt = now();
     chat.draft = "";
@@ -477,7 +495,7 @@ export const useStudioStore = defineStore("studio", () => {
       await persistUiState();
       const payload = {
         chat: clone(chat),
-        message: buildPromptWithCommandContext(chat, promptText),
+        message: buildPromptWithCommandContext(chat, promptText, userMessage.id, turnId),
         turnId,
         appSettings: clone(appSettings.value),
         extraFiles: allExtraFiles
@@ -600,16 +618,33 @@ export const useStudioStore = defineStore("studio", () => {
     scrollToBottom("smooth");
   }
 
-  function buildPromptWithCommandContext(chat: Chat, text: string) {
+  function buildPromptWithCommandContext(chat: Chat, text: string, currentMessageId = "", currentTurnId = "") {
     const identity = buildMovoIdentityInstruction();
+    const movoReferences = buildMovoReferenceContext(chat, currentMessageId, currentTurnId);
     const commandBlocks = chat.messages
       .filter((message) => message.role === "system" && message.text.startsWith("Command output entered context:"))
       .slice(-3)
       .map((message) => message.text)
       .join("\n\n") || "";
-    const withIdentity = `${identity}\n\n${text}`;
+    const withIdentity = `${identity}\n\n${movoReferences}\n\n${text}`;
     if (!commandBlocks) return withIdentity;
     return `${withIdentity}\n\nRecent command context:\n${commandBlocks}`;
+  }
+
+  function buildMovoReferenceContext(chat: Chat, currentMessageId: string, currentTurnId: string) {
+    const recent = chat.messages.slice(-24);
+    const lines = recent.map((message) => {
+      const marker = message.id === currentMessageId ? " current-request" : "";
+      const preview = singleLinePreview(stripHtmlForReference(message.text), 180);
+      return `- ${message.role}${marker}: movo_message_id=${message.id} | ${preview}`;
+    });
+    return [
+      "<movo_references>",
+      "Movo message/request IDs are first-class references. If the user provides a UUID-like Movo ID, match it against movo_message_id below before saying you cannot access it.",
+      currentTurnId && `current_turn_id=${currentTurnId}`,
+      ...lines,
+      "</movo_references>"
+    ].filter(Boolean).join("\n");
   }
 
   function withAttachmentContext(text: string, attachments: ChatAttachment[]) {
@@ -766,14 +801,15 @@ export const useStudioStore = defineStore("studio", () => {
     }
   }
 
-  async function createTerminal() {
+  async function createTerminal(title?: string, cwdOverride?: string) {
     const scope = currentTerminalScope();
     const id = uid();
     const index = scope.sessions.length + 1;
-    const cwd = projectRoot.value;
+    const cwd = cwdOverride || projectRoot.value;
+    const cleanTitle = typeof title === "string" ? title : "";
     scope.sessions.push({
       id,
-      title: `Terminal ${index}`,
+      title: cleanTitle || `Terminal ${index}`,
       cwd,
       running: true,
       exitCode: null
@@ -788,6 +824,7 @@ export const useStudioStore = defineStore("studio", () => {
         terminal.exitCode = -1;
       }
     }
+    return result.ok ? id : "";
   }
 
   function ensureTerminal() {
@@ -799,6 +836,66 @@ export const useStudioStore = defineStore("studio", () => {
   function openTerminalPanel() {
     ensureTerminal();
     showTerminal.value = true;
+  }
+
+  function applyDevServerPreset(command: string, name = "") {
+    devServerDraftCommand.value = command;
+    devServerDraftName.value = name;
+  }
+
+  async function startDevServer(command = devServerDraftCommand.value, name = devServerDraftName.value) {
+    const cleanCommand = command.trim();
+    const cwd = projectRoot.value;
+    if (!cleanCommand || !cwd) return;
+
+    const serverId = uid();
+    const terminalTitle = name.trim() || commandNameFromDevServer(cleanCommand);
+    const terminalId = await createTerminal(terminalTitle, cwd);
+    const session: DevServerSession = {
+      id: serverId,
+      name: terminalTitle,
+      command: cleanCommand,
+      cwd,
+      terminalId: terminalId || "",
+      status: "starting",
+      createdAt: now(),
+      updatedAt: now()
+    };
+    currentDevServerScope().sessions.unshift(session);
+    showTerminal.value = true;
+    await nextTick();
+    if (terminalId) {
+      await window.studio.writeTerminalInput({ terminalId, data: `${cleanCommand}\r` });
+      session.status = "running";
+      session.updatedAt = now();
+    } else {
+      session.status = "stopped";
+      session.updatedAt = now();
+    }
+    devServerDraftCommand.value = "";
+    devServerDraftName.value = "";
+  }
+
+  async function stopDevServer(serverId: string) {
+    const server = devServerSessions.value.find((item) => item.id === serverId);
+    if (!server) return;
+    await stopTerminalCommand(server.terminalId);
+    server.status = "stopped";
+    server.updatedAt = now();
+  }
+
+  function focusDevServer(serverId: string) {
+    const server = devServerSessions.value.find((item) => item.id === serverId);
+    if (!server) return;
+    selectTerminal(server.terminalId);
+    showTerminal.value = true;
+  }
+
+  async function removeDevServer(serverId: string) {
+    const scope = currentDevServerScope();
+    const server = scope.sessions.find((item) => item.id === serverId);
+    if (server?.status !== "stopped") await stopDevServer(serverId);
+    scope.sessions = scope.sessions.filter((item) => item.id !== serverId);
   }
 
   function toggleTerminalFloating() {
@@ -847,6 +944,13 @@ export const useStudioStore = defineStore("studio", () => {
     terminal.running = false;
     terminal.exitCode = event.code;
     if (event.cwd) terminal.cwd = event.cwd;
+    for (const devScope of Object.values(devServerScopes.value)) {
+      const server = devScope.sessions.find((item) => item.terminalId === event.terminalId);
+      if (server) {
+        server.status = "stopped";
+        server.updatedAt = now();
+      }
+    }
   }
 
   async function approvePermission(permType: string) {
@@ -1272,6 +1376,10 @@ export const useStudioStore = defineStore("studio", () => {
     activeChatId,
     terminalSessions,
     activeTerminalId,
+    devServerSessions,
+    devServerPresets,
+    devServerDraftName,
+    devServerDraftCommand,
     cliStatus,
     isRunning,
     isStopping,
@@ -1326,6 +1434,11 @@ export const useStudioStore = defineStore("studio", () => {
     updateScrollState,
     scrollToBottom,
     createTerminal,
+    applyDevServerPreset,
+    startDevServer,
+    stopDevServer,
+    focusDevServer,
+    removeDevServer,
     openTerminalPanel,
     toggleTerminalFloating,
     selectTerminal,
@@ -1385,6 +1498,66 @@ function extractMentionedFiles(text: string, files: ProjectFile[]) {
 
 function fileNameFromPath(path: string) {
   return path.split(/[/\\]/).filter(Boolean).pop() || path;
+}
+
+function commandNameFromDevServer(command: string) {
+  if (/npm\s+run\s+dev/i.test(command)) return "npm dev";
+  if (/pnpm\s+dev/i.test(command)) return "pnpm dev";
+  if (/yarn\s+dev/i.test(command)) return "yarn dev";
+  if (/artisan\s+serve/i.test(command)) return "Laravel";
+  if (/manage\.py\s+runserver/i.test(command)) return "Django";
+  if (/docker\s+compose\s+up/i.test(command)) return "Docker";
+  return command.split(/\s+/).slice(0, 3).join(" ");
+}
+
+function buildDevServerPresets(files: ProjectFile[]) {
+  const paths = new Set(files.map((file) => file.path.replace(/\\/g, "/").toLowerCase()));
+  const has = (path: string) => paths.has(path.toLowerCase());
+  const hasEnding = (suffix: string) => Array.from(paths).some((path) => path.endsWith(suffix.toLowerCase()));
+  const presets: Array<{ name: string; command: string; hint: string }> = [];
+  const add = (name: string, command: string, hint: string) => {
+    if (!presets.some((preset) => preset.command === command)) presets.push({ name, command, hint });
+  };
+
+  if (has("package.json")) {
+    add("npm dev", "npm run dev", "Node / frontend");
+    add("npm start", "npm start", "Node app");
+  }
+  if (has("pnpm-lock.yaml")) add("pnpm dev", "pnpm dev", "pnpm workspace");
+  if (has("yarn.lock")) add("yarn dev", "yarn dev", "Yarn project");
+  if (has("bun.lockb") || has("bun.lock")) add("bun dev", "bun run dev", "Bun project");
+  if (has("artisan")) add("Laravel", "php artisan serve", "PHP framework");
+  if (has("manage.py")) add("Django", "python manage.py runserver", "Python framework");
+  if (has("app.py") || has("wsgi.py")) add("Flask", "flask run", "Python app");
+  if (has("go.mod")) add("Go", "go run .", "Go module");
+  if (has("cargo.toml")) add("Rust", "cargo run", "Rust app");
+  if (has("docker-compose.yml") || has("docker-compose.yaml") || has("compose.yml") || has("compose.yaml")) {
+    add("Docker", "docker compose up", "Containers");
+  }
+  if (hasEnding("/deno.json") || has("deno.json")) add("Deno", "deno task dev", "Deno task");
+  if (!presets.length) {
+    add("npm dev", "npm run dev", "Common default");
+    add("start", "npm start", "Common default");
+    add("Docker", "docker compose up", "Containers");
+  }
+  return presets.slice(0, 8);
+}
+
+function stripHtmlForReference(value: string) {
+  return value
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function singleLinePreview(value: string, maxLength: number) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (!clean) return "(empty)";
+  return clean.length > maxLength ? `${clean.slice(0, maxLength - 1)}...` : clean;
 }
 
 const codeLikeExts = new Set([
