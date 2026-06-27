@@ -11,6 +11,7 @@ const inputMirror = ref<HTMLElement | null>(null);
 const composerInput = ref<HTMLTextAreaElement | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 const mentionTooltip = ref({ visible: false, text: "", x: 0, y: 0 });
+const imagePreview = ref<{ src: string; name: string; path: string } | null>(null);
 
 function onDragOver(e: DragEvent) {
   e.preventDefault();
@@ -48,6 +49,16 @@ function sendFromButton() {
     return;
   }
   void studio.runPrompt();
+}
+
+function openImagePreview(attachment: { path: string; name: string; previewUrl?: string; filePreviewUrl?: string }) {
+  const src = attachment.previewUrl || attachment.filePreviewUrl;
+  if (!src) return;
+  imagePreview.value = { src, name: attachment.name, path: attachment.path };
+}
+
+function closeImagePreview() {
+  imagePreview.value = null;
 }
 
 async function attachPath(path: string) {
@@ -460,7 +471,11 @@ function formatSize(bytes: number) {
           v-if="attachment.kind === 'image' && (attachment.previewUrl || attachment.filePreviewUrl)"
           :src="attachment.previewUrl || attachment.filePreviewUrl"
           :alt="attachment.name"
+          role="button"
+          tabindex="0"
           @error="attachment.previewUrl = attachment.filePreviewUrl || ''; studio.addDraftAttachment(attachment)"
+          @click.stop="openImagePreview(attachment)"
+          @keydown.enter.stop.prevent="openImagePreview(attachment)"
         />
         <div v-else class="attachment-file-icon">
           <ImageIcon v-if="attachment.kind === 'image'" :size="18" />
@@ -570,6 +585,19 @@ function formatSize(bytes: number) {
       <button v-else class="send-btn" type="button" :disabled="!studio.canRun" @click="sendFromButton">
         <Play :size="14" />
       </button>
+    </div>
+
+    <div v-if="imagePreview" class="image-lightbox" tabindex="-1" @click.self="closeImagePreview" @keydown.escape="closeImagePreview">
+      <div class="image-lightbox-content">
+        <button class="image-lightbox-close" type="button" :title="t('close')" @click="closeImagePreview">
+          <X :size="16" />
+        </button>
+        <img :src="imagePreview.src" :alt="imagePreview.name" />
+        <div class="image-lightbox-caption">
+          <strong>{{ imagePreview.name }}</strong>
+          <span>{{ imagePreview.path }}</span>
+        </div>
+      </div>
     </div>
   </form>
 </template>

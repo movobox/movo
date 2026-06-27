@@ -1532,6 +1532,83 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   height: 54px;
 }
 
+.attachment-card img {
+  cursor: zoom-in;
+}
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.image-lightbox-content {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  max-width: min(92vw, 1100px);
+  max-height: 92vh;
+}
+
+.image-lightbox-content > img {
+  max-width: min(92vw, 1100px);
+  max-height: calc(92vh - 72px);
+  border-radius: 8px;
+  object-fit: contain;
+  background: #0b0b0d;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(10, 10, 12, 0.72);
+  color: #f4f4f5;
+}
+
+.image-lightbox-close:hover {
+  background: rgba(39, 39, 42, 0.92);
+}
+
+.image-lightbox-caption {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #2d2d33;
+  border-radius: 8px;
+  background: rgba(15, 15, 18, 0.9);
+}
+
+.image-lightbox-caption strong,
+.image-lightbox-caption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-lightbox-caption strong {
+  color: #f4f4f5;
+  font-size: 12px;
+}
+
+.image-lightbox-caption span {
+  color: #a1a1aa;
+  direction: ltr;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+}
+
 .composer-input-wrap {
   position: relative;
   min-height: 40px;

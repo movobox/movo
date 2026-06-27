@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowDown, Bot, Copy, File, FileEdit, FilePlus, FileSearch, FileText, FolderOpen, ImageIcon, Pencil, RefreshCcw, RotateCcw, Search, Shield, ShieldCheck, Terminal, X } from "@lucide/vue";
-import { computed, watchEffect } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 import { highlightCode } from "../../utils/highlight";
@@ -8,6 +8,7 @@ import MessageContent from "./MessageContent.vue";
 
 const studio = useStudioStore();
 const { t } = useI18n();
+const imagePreview = ref<{ src: string; name: string; path: string } | null>(null);
 
 const queuedAsMessages = computed(() => {
   return studio.messageQueue.map((q) => ({ id: q.id, text: q.text }));
@@ -41,6 +42,16 @@ function isFilePath(detail: string) {
 
 function openInExplorer(filePath: string) {
   void window.studio.openPath(filePath);
+}
+
+function openImagePreview(attachment: { path: string; name: string; previewUrl?: string; filePreviewUrl?: string }) {
+  const src = attachment.previewUrl || attachment.filePreviewUrl;
+  if (!src) return;
+  imagePreview.value = { src, name: attachment.name, path: attachment.path };
+}
+
+function closeImagePreview() {
+  imagePreview.value = null;
 }
 
 async function enrichAttachment(attachment: { path: string; name: string; kind: "image" | "binary"; mime: string; size: number; previewUrl?: string; filePreviewUrl?: string }) {
@@ -128,7 +139,7 @@ function truncateCode(code: string, maxLines = 40): string {
                   class="attachment-card"
                   type="button"
                   :title="attachment.path"
-                  @click="openInExplorer(attachment.path)"
+                  @click="attachment.kind === 'image' ? openImagePreview(attachment) : openInExplorer(attachment.path)"
                 >
                   <img
                     v-if="attachment.kind === 'image' && (attachment.previewUrl || attachment.filePreviewUrl)"
@@ -276,5 +287,18 @@ function truncateCode(code: string, maxLines = 40): string {
     >
       <ArrowDown :size="16" />
     </button>
+
+    <div v-if="imagePreview" class="image-lightbox" tabindex="-1" @click.self="closeImagePreview" @keydown.escape="closeImagePreview">
+      <div class="image-lightbox-content">
+        <button class="image-lightbox-close" type="button" :title="t('close')" @click="closeImagePreview">
+          <X :size="16" />
+        </button>
+        <img :src="imagePreview.src" :alt="imagePreview.name" />
+        <div class="image-lightbox-caption">
+          <strong>{{ imagePreview.name }}</strong>
+          <span>{{ imagePreview.path }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
