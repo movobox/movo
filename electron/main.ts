@@ -924,7 +924,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
       args.push(formatFileArg(f));
     }
     console.log("[main] mimo:run args:", args.map((arg) => arg.length > 180 ? `${arg.slice(0, 180)}... (${arg.length} chars)` : arg));
-    const mimoEnv = buildMimoEnvironment(projectFolder, s);
+    const mimoEnv = buildMimoEnvironment(projectFolder, s, payload.chat?.id || "");
     return runMimo(args, payload.chat.folder || process.cwd(), true, 0, "", 0, mimoEnv, payload.chat?.id || "", payload.message || "");
   } catch (e) {
     console.error("[main] mimo:run error:", e);
@@ -1098,28 +1098,30 @@ function projectConfigDirPath(folder: string, appSettings: AppSettings) {
   return join(base, defaultAppSettings.projectConfigDir);
 }
 
-function engineProfileRoot() {
-  return join(app.getPath("userData"), "movo-engine-profile");
+function engineProfileRoot(scopeId = "") {
+  const root = join(app.getPath("userData"), "movo-engine-profile");
+  if (!scopeId) return root;
+  return join(root, "chats", safeFileName(scopeId));
 }
 
-function engineDatabasePath() {
-  return join(engineProfileRoot(), "data", "movo.db");
+function engineDatabasePath(scopeId = "") {
+  return join(engineProfileRoot(scopeId), "data", "movo.db");
 }
 
-function engineConfigPath() {
-  return join(engineProfileRoot(), "config", "movo-engine.json");
+function engineConfigPath(scopeId = "") {
+  return join(engineProfileRoot(scopeId), "config", "movo-engine.json");
 }
 
-function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
+function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings, scopeId = ""): Record<string, string> {
   const trusted = isProjectTrusted(appSettings, projectFolder);
   const config = buildEngineConfig(projectFolder, appSettings, trusted);
   stripMovoProjectMetadata(config);
-  const configPath = engineConfigPath();
+  const configPath = engineConfigPath(scopeId);
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
   const env: Record<string, string> = {
-    [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot(),
-    [`${ENGINE_ENV_PREFIX}_DB`]: engineDatabasePath(),
+    [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot(scopeId),
+    [`${ENGINE_ENV_PREFIX}_DB`]: engineDatabasePath(scopeId),
     [`${ENGINE_ENV_PREFIX}_CONFIG`]: configPath,
     [`${ENGINE_ENV_PREFIX}_CONFIG_DIR`]: dirname(configPath),
     [`${ENGINE_ENV_PREFIX}_DISABLE_PROJECT_CONFIG`]: "true"

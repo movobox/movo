@@ -473,7 +473,7 @@ export const useStudioStore = defineStore("studio", () => {
       await persistUiState();
       const payload = {
         chat: clone(chat),
-        message: buildPromptWithCommandContext(promptText),
+        message: buildPromptWithCommandContext(chat, promptText),
         appSettings: clone(appSettings.value),
         extraFiles: allExtraFiles
       };
@@ -592,9 +592,9 @@ export const useStudioStore = defineStore("studio", () => {
     scrollToBottom("smooth");
   }
 
-  function buildPromptWithCommandContext(text: string) {
+  function buildPromptWithCommandContext(chat: Chat, text: string) {
     const identity = buildMovoIdentityInstruction();
-    const commandBlocks = activeChat.value?.messages
+    const commandBlocks = chat.messages
       .filter((message) => message.role === "system" && message.text.startsWith("Command output entered context:"))
       .slice(-3)
       .map((message) => message.text)
