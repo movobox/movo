@@ -552,6 +552,28 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 .markdown-body h2 { font-size: 18px; }
 .markdown-body h3 { font-size: 16px; }
 .markdown-body h4 { font-size: 14px; }
+.markdown-body h1,
+.markdown-body h2 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 12px 0 6px;
+  color: #d4d4d8;
+  font-size: 13px;
+  font-weight: 700;
+}
+.markdown-body strong {
+  color: #f4f4f5;
+  font-weight: 700;
+}
+.markdown-body em {
+  color: #e5e7eb;
+}
+.markdown-body s {
+  color: #71717a;
+}
 .markdown-body ul,
 .markdown-body ol {
   margin: 8px 0 12px;
@@ -566,6 +588,66 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 }
 .markdown-body li > p {
   margin: 4px 0;
+}
+.markdown-body .md-workflow-list {
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 0;
+  list-style: none;
+  counter-reset: md-step;
+}
+.markdown-body .md-workflow-list > li {
+  position: relative;
+  min-height: 30px;
+  margin: 0;
+  padding: 8px 10px 8px 42px;
+  border: 1px solid #24242c;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+  counter-increment: md-step;
+}
+.markdown-body .md-workflow-list > li::before {
+  content: counter(md-step);
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #24243a;
+  color: #a5b4fc;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.markdown-body .md-workflow-list > li[dir="rtl"] {
+  padding: 8px 42px 8px 10px;
+}
+.markdown-body .md-workflow-list > li[dir="rtl"]::before {
+  right: 10px;
+  left: auto;
+}
+.markdown-body .md-task-item {
+  list-style: none;
+  margin-inline-start: -18px;
+}
+.markdown-body .md-task-check {
+  width: 15px;
+  height: 15px;
+  margin: 0 8px 0 0;
+  vertical-align: -2px;
+  accent-color: #6366f1;
+}
+.markdown-body li[dir="rtl"] .md-task-check {
+  margin: 0 0 0 8px;
+}
+.markdown-body .md-task-item.done {
+  color: #a1a1aa;
+}
+.markdown-body .md-task-item.done strong {
+  color: #d4d4d8;
 }
 .markdown-body a {
   color: #93c5fd;
@@ -683,29 +765,121 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   background: rgba(99, 102, 241, 0.08);
   color: #c7c7d1;
 }
-.markdown-body table {
+.markdown-body .md-callout {
+  position: relative;
+  padding: 10px 12px 10px 38px;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-inline-start-width: 4px;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.09);
+}
+.markdown-body .md-callout::before {
+  content: "i";
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(99, 102, 241, 0.25);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 800;
+}
+.markdown-body .md-callout[dir="rtl"] {
+  padding: 10px 38px 10px 12px;
+}
+.markdown-body .md-callout[dir="rtl"]::before {
+  right: 12px;
+  left: auto;
+}
+.markdown-body .md-callout.tip {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+.markdown-body .md-callout.tip::before {
+  content: "?";
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+.markdown-body .md-callout.warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.09);
+}
+.markdown-body .md-callout.warning::before {
+  content: "!";
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+.markdown-body .md-callout.danger {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(127, 29, 29, 0.16);
+}
+.markdown-body .md-callout.danger::before {
+  content: "!";
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+.markdown-body .md-table-wrap {
   display: block;
   width: 100%;
   margin: 12px 0;
   overflow-x: auto;
-  border-collapse: collapse;
+  border: 1px solid #27272f;
+  border-radius: 9px;
+  background: #101014;
+}
+.markdown-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .markdown-body th,
 .markdown-body td {
-  padding: 7px 10px;
-  border: 1px solid #27272f;
+  padding: 9px 11px;
+  border: 0;
+  border-bottom: 1px solid #27272f;
+  border-inline-end: 1px solid #27272f;
   text-align: start;
+  vertical-align: top;
 }
 .markdown-body th {
   background: #18181b;
   color: #f4f4f5;
   font-weight: 700;
 }
+.markdown-body tr:last-child td {
+  border-bottom: 0;
+}
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-inline-end: 0;
+}
+.markdown-body tbody tr:nth-child(even) {
+  background: rgba(255,255,255,0.018);
+}
+.markdown-body tbody tr:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
 .markdown-body hr {
   height: 1px;
-  margin: 16px 0;
+  margin: 18px 0;
   border: 0;
-  background: #27272f;
+  background: linear-gradient(90deg, transparent, #3f3f46, transparent);
+}
+.markdown-body .md-divider {
+  position: relative;
+}
+.markdown-body .md-divider::after {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 3px;
+  margin: -2px auto 0;
+  border-radius: 999px;
+  background: #6366f1;
 }
 .markdown-body details {
   margin: 12px 0;

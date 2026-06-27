@@ -17,6 +17,17 @@ function resolveFilePath(value: string) {
 
 function handleClick(event: MouseEvent) {
   const target = event.target as HTMLElement | null;
+  const copyButton = target?.closest("[data-md-copy-code]") as HTMLButtonElement | null;
+  if (copyButton) {
+    event.preventDefault();
+    const code = copyButton.closest(".md-codeblock")?.querySelector("code")?.textContent || "";
+    void navigator.clipboard.writeText(code).then(() => {
+      const previous = copyButton.textContent || "Copy";
+      copyButton.textContent = "Copied";
+      window.setTimeout(() => { copyButton.textContent = previous; }, 1200);
+    });
+    return;
+  }
   const anchor = target?.closest("a") as HTMLAnchorElement | null;
   if (anchor?.href) {
     event.preventDefault();
