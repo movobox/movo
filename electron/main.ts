@@ -2028,12 +2028,13 @@ function summarizeMimoToolEvent(event: any): { text: string; detail: string; cod
     const renderedOutput = output ? stringifyToolValue(output) : "";
     const readOutput = parseReadToolOutput(renderedOutput);
     const readPath = readOutput.path || filePath;
-    const readContent = readOutput.content || renderedOutput;
+    const readContent = readOutput.content || readOutput.entries || renderedOutput;
     return {
       text: `Reading ${readPath ? basename(readPath) : "file"}`,
       detail: joinDetail([
         readPath && `Path: ${readPath}`,
         readOutput.type && `Type: ${readOutput.type}`,
+        readOutput.entryCount && `Entries: ${readOutput.entryCount}`,
         readOutput.lineCount && `Lines: ${readOutput.lineCount}`,
         input.offset !== undefined && `Offset: ${input.offset}`,
         input.limit !== undefined && `Limit: ${input.limit}`,
@@ -2329,15 +2330,18 @@ function formatOutputPreview(value: any, maxLines = 8) {
   return `${preview}${lines.length > maxLines ? `\n... (${lines.length - maxLines} more lines)` : ""}`;
 }
 
-function parseReadToolOutput(value: string): { path: string; type: string; content: string; lineCount: number } {
+function parseReadToolOutput(value: string): { path: string; type: string; content: string; entries: string; lineCount: number; entryCount: number } {
   const raw = unwrapToolValue(value);
   const path = raw.match(/<path>([\s\S]*?)<\/path>/i)?.[1]?.trim() || "";
   const type = raw.match(/<type>([\s\S]*?)<\/type>/i)?.[1]?.trim() || "";
   const contentRaw = raw.match(/<content>\s*([\s\S]*?)\s*<\/content>/i)?.[1] || "";
+  const entriesRaw = raw.match(/<entries>\s*([\s\S]*?)\s*<\/entries>/i)?.[1] || "";
   const content = stripReadLineNumbers(contentRaw.trim());
+  const entries = stripReadEntries(entriesRaw.trim());
   const endLineCount = Number(raw.match(/\(End of file - total\s+(\d+)\s+lines?\)/i)?.[1] || 0);
+  const entryCount = Number(raw.match(/\((\d+)\s+entries\)/i)?.[1] || 0) || (entries ? entries.split(/\r?\n/).filter(Boolean).length : 0);
   const lineCount = endLineCount || (content ? content.split(/\r?\n/).length : 0);
-  return { path, type, content, lineCount };
+  return { path, type, content, entries, lineCount, entryCount };
 }
 
 function unwrapToolValue(value: string) {
@@ -2357,6 +2361,14 @@ function stripReadLineNumbers(content: string) {
     .map((line) => line.replace(/^\s*\d+:\s?/, ""))
     .join("\n")
     .trimEnd();
+}
+
+function stripReadEntries(entries: string) {
+  return entries
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\(\d+\s+entries\)$/i.test(line))
+    .join("\n");
 }
 
 function formatToolParameters(input: Record<string, any>, metadata: Record<string, any>) {

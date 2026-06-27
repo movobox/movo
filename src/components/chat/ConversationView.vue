@@ -132,13 +132,14 @@ function readDetailParts(detail = "") {
   return {
     path: detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "",
     type: detail.match(/^Type:\s*(.+)$/im)?.[1]?.trim() || "",
+    entries: detail.match(/^Entries:\s*(.+)$/im)?.[1]?.trim() || "",
     lines: detail.match(/^Lines:\s*(.+)$/im)?.[1]?.trim() || ""
   };
 }
 
 function isReadMetaDetail(detail = "") {
   const meta = readDetailParts(detail);
-  return Boolean(meta.path && meta.lines);
+  return Boolean(meta.path && (meta.lines || meta.entries));
 }
 
 function formatVisibleActivityResult(result: string) {
@@ -286,7 +287,8 @@ function activityOpenPath(detail = "") {
                         <span class="activity-read-meta">
                           <span>Path <code>{{ readDetailParts(item.detail).path }}</code></span>
                           <span v-if="readDetailParts(item.detail).type">Type <code>{{ readDetailParts(item.detail).type }}</code></span>
-                          <span>Lines <code>{{ readDetailParts(item.detail).lines }}</code></span>
+                          <span v-if="readDetailParts(item.detail).entries">Entries <code>{{ readDetailParts(item.detail).entries }}</code></span>
+                          <span v-if="readDetailParts(item.detail).lines">Lines <code>{{ readDetailParts(item.detail).lines }}</code></span>
                         </span>
                       </template>
                       <template v-else-if="!shouldCollapseActivityDetail(item)">{{ item.detail }}</template>

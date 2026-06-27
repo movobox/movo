@@ -1447,7 +1447,8 @@ function normalizeReadActivity(activity: RunActivity): RunActivity | null {
   if (!/\breading\b/i.test(activity.text)) return null;
   const source = activity.code || activity.detail;
   const parsed = parseReadToolOutput(source);
-  if (!parsed.content) return null;
+  const readable = parsed.content || parsed.entries;
+  if (!readable) return null;
   const filePath = activity.editFilePath || parsed.path || activity.detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "";
   return {
     ...activity,
@@ -1455,23 +1456,27 @@ function normalizeReadActivity(activity: RunActivity): RunActivity | null {
     detail: [
       filePath && `Path: ${filePath}`,
       parsed.type && `Type: ${parsed.type}`,
+      parsed.entryCount && `Entries: ${parsed.entryCount}`,
       parsed.lineCount && `Lines: ${parsed.lineCount}`
     ].filter(Boolean).join("\n"),
-    code: parsed.content,
-    codeLang: activity.codeLang || extToCodeLang(filePath),
+    code: readable,
+    codeLang: parsed.entries ? "text" : activity.codeLang || extToCodeLang(filePath),
     editFilePath: filePath || activity.editFilePath
   };
 }
 
-function parseReadToolOutput(value: string): { path: string; type: string; content: string; lineCount: number } {
+function parseReadToolOutput(value: string): { path: string; type: string; content: string; entries: string; lineCount: number; entryCount: number } {
   const raw = unwrapToolValue(value);
   const path = raw.match(/<path>([\s\S]*?)<\/path>/i)?.[1]?.trim() || "";
   const type = raw.match(/<type>([\s\S]*?)<\/type>/i)?.[1]?.trim() || "";
   const contentRaw = raw.match(/<content>\s*([\s\S]*?)\s*<\/content>/i)?.[1] || "";
+  const entriesRaw = raw.match(/<entries>\s*([\s\S]*?)\s*<\/entries>/i)?.[1] || "";
   const content = stripReadLineNumbers(contentRaw.trim());
+  const entries = stripReadEntries(entriesRaw.trim());
   const endLineCount = Number(raw.match(/\(End of file - total\s+(\d+)\s+lines?\)/i)?.[1] || 0);
+  const entryCount = Number(raw.match(/\((\d+)\s+entries\)/i)?.[1] || 0) || (entries ? entries.split(/\r?\n/).filter(Boolean).length : 0);
   const lineCount = endLineCount || (content ? content.split(/\r?\n/).length : 0);
-  return { path, type, content, lineCount };
+  return { path, type, content, entries, lineCount, entryCount };
 }
 
 function unwrapToolValue(value: string) {
@@ -1491,6 +1496,14 @@ function stripReadLineNumbers(content: string) {
     .map((line) => line.replace(/^\s*\d+:\s?/, ""))
     .join("\n")
     .trimEnd();
+}
+
+function stripReadEntries(entries: string) {
+  return entries
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\(\d+\s+entries\)$/i.test(line))
+    .join("\n");
 }
 
 function parseStructuredActivityDetail(detail: string): { target?: string; preview?: string; result?: string; before?: string; after?: string } | null {
@@ -1725,6 +1738,7 @@ function formatActivityDetail(detail: string, collapsible = false) {
       `<div class="activity-log-read-meta">`,
       readMeta.path ? `<span>Path <code>${escapeHtml(readMeta.path)}</code></span>` : "",
       readMeta.type ? `<span>Type <code>${escapeHtml(readMeta.type)}</code></span>` : "",
+      readMeta.entries ? `<span>Entries <code>${escapeHtml(readMeta.entries)}</code></span>` : "",
       readMeta.lines ? `<span>Lines <code>${escapeHtml(readMeta.lines)}</code></span>` : "",
       `</div>`
     ].join("");
@@ -1755,11 +1769,12 @@ function formatActivityDetail(detail: string, collapsible = false) {
   return `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`;
 }
 
-function parseReadMetaDetail(detail: string): { path: string; type: string; lines: string } | null {
-  if (!/^Path:/im.test(detail) || !/^Lines:/im.test(detail)) return null;
+function parseReadMetaDetail(detail: string): { path: string; type: string; entries: string; lines: string } | null {
+  if (!/^Path:/im.test(detail) || (!/^Lines:/im.test(detail) && !/^Entries:/im.test(detail))) return null;
   return {
     path: detail.match(/^Path:\s*(.+)$/im)?.[1]?.trim() || "",
     type: detail.match(/^Type:\s*(.+)$/im)?.[1]?.trim() || "",
+    entries: detail.match(/^Entries:\s*(.+)$/im)?.[1]?.trim() || "",
     lines: detail.match(/^Lines:\s*(.+)$/im)?.[1]?.trim() || ""
   };
 }
