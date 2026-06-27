@@ -996,6 +996,28 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 .activity-log-code.diff {
   color: #cbd5e1;
 }
+.activity-log-details {
+  margin: 8px 0 0;
+  border: 1px solid #23232a;
+  border-radius: 7px;
+  background: #0d0d10;
+  overflow: hidden;
+}
+.activity-log-details summary {
+  padding: 7px 10px;
+  background: #15151a;
+  color: #a1a1aa;
+  font-family: "Cascadia Code", Consolas, ui-monospace, monospace;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.activity-log-details .activity-log-detail {
+  max-height: 260px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid #23232a;
+  border-radius: 0;
+}
 .activity-log-files {
   display: flex;
   flex-wrap: wrap;
@@ -1222,6 +1244,34 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   scrollbar-width: thin;
   scrollbar-color: #333 transparent;
 }
+.activity-detail.collapsed {
+  order: 3;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border-style: dashed;
+  word-break: normal;
+}
+.activity-inline-details {
+  overflow: hidden;
+}
+.activity-inline-details summary {
+  padding: 6px 10px;
+  color: #a1a1aa;
+  cursor: pointer;
+  user-select: none;
+}
+.activity-inline-details pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-top: 1px solid #1e1e28;
+  color: #8b8b94;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .activity-detail::-webkit-scrollbar { width: 4px; }
 .activity-detail::-webkit-scrollbar-track { background: transparent; }
 .activity-detail::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
@@ -1278,7 +1328,11 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 @keyframes blink { 50% { opacity: 0.2; } }
 
 .activity-code-block {
+  order: 2;
   margin-top: 6px;
+}
+.activity-diff {
+  order: 2;
 }
 .activity-code {
   background: #0d0d0f;

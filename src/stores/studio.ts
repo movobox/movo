@@ -1445,10 +1445,12 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
   for (const [index, activity] of useful.entries()) {
     lines.push(`<section class="activity-log-item${isErrorActivity(activity.text, activity.detail) ? " error" : ""}">`);
     lines.push(`<div class="activity-log-item-head"><span class="activity-log-index">${index + 1}</span><span class="activity-log-title">${escapeHtml(activity.text)}</span></div>`);
-    if (activity.detail) lines.push(formatActivityDetail(activity.detail));
     if (activity.editFilePath) lines.push(`<div class="activity-log-file">File: <code>${escapeHtml(activity.editFilePath)}</code></div>`);
     if (activity.code) {
       lines.push(`<pre class="activity-log-code" dir="ltr"><code class="language-${escapeHtml(activity.codeLang || "text")}">${escapeHtml(truncateActivityCode(activity.code))}</code></pre>`);
+      if (activity.detail) lines.push(formatActivityDetail(activity.detail, true));
+    } else if (activity.detail) {
+      lines.push(formatActivityDetail(activity.detail));
     }
     if (activity.oldCode || activity.newCode) {
       const diffLines: string[] = [];
@@ -1533,12 +1535,20 @@ function truncateActivityCode(code: string, maxLines = 40) {
   return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} more lines)`;
 }
 
-function formatActivityDetail(detail: string) {
+function formatActivityDetail(detail: string, collapsible = false) {
   const lines = detail.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
   const fileLines = lines.filter((line) => /^[-*]\s+/.test(line) || /^[A-Za-z]:[\\/]/.test(line) || line.includes("/") || line.includes("\\"));
   if (fileLines.length >= 2 && lines.some((line) => /^Files?:/i.test(line))) {
     const files = fileLines.map((line) => line.replace(/^[-*]\s+/, ""));
     return `<div class="activity-log-files">${files.map((file) => `<code>${escapeHtml(file)}</code>`).join("")}</div>`;
+  }
+  if (collapsible) {
+    return [
+      `<details class="activity-log-details">`,
+      `<summary>Details</summary>`,
+      `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`,
+      `</details>`
+    ].join("");
   }
   return `<pre class="activity-log-detail">${escapeHtml(detail)}</pre>`;
 }

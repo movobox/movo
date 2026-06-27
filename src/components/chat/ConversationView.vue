@@ -91,6 +91,10 @@ function truncateCode(code: string, maxLines = 40): string {
   if (lines.length <= maxLines) return code;
   return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
 }
+
+function shouldCollapseActivityDetail(item: { detail?: string; code?: string; oldCode?: string; newCode?: string }) {
+  return Boolean(item.detail && (item.code || item.oldCode || item.newCode));
+}
 </script>
 
 <template>
@@ -203,9 +207,15 @@ function truncateCode(code: string, maxLines = 40): string {
                     <span
                       v-if="item.detail"
                       class="activity-detail"
-                      :class="{ 'activity-file-link': isFilePath(item.detail) }"
+                      :class="{ 'activity-file-link': isFilePath(item.detail), collapsed: shouldCollapseActivityDetail(item) }"
                       @click="isFilePath(item.detail) && openInExplorer(item.detail)"
-                    >{{ item.detail }}</span>
+                    >
+                      <template v-if="!shouldCollapseActivityDetail(item)">{{ item.detail }}</template>
+                      <details v-else class="activity-inline-details">
+                        <summary>Details</summary>
+                        <pre>{{ item.detail }}</pre>
+                      </details>
+                    </span>
                     <div v-if="item.oldCode || item.newCode" class="activity-diff">
                       <div v-if="item.editFilePath" class="diff-filepath">{{ item.editFilePath }}</div>
                       <div v-if="item.oldCode" class="diff-block diff-removed">
