@@ -102,7 +102,8 @@ const defaultAgents = {
   },
   ask: {
     description: "Answer questions, explain code, and inspect context without making changes unless explicitly asked.",
-    mode: "all",
+    mode: "primary",
+    prompt: "Answer questions, explain code, and inspect the current context. Do not make file edits unless the user explicitly asks for changes.",
     temperature: 0.2,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -114,7 +115,8 @@ const defaultAgents = {
   },
   debugger: {
     description: "Trace runtime errors, logs, failing tests, and reproduction steps.",
-    mode: "all",
+    mode: "primary",
+    prompt: "Act as a debugging agent. Focus on reproducing issues, reading logs, tracing root causes, and proposing or applying minimal fixes when requested.",
     temperature: 0.1,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -144,13 +146,15 @@ const defaultAgents = {
   },
   compose: {
     description: "Draft text, documentation, prompts, release notes, and structured content.",
-    mode: "all",
+    mode: "primary",
+    prompt: "Act as a compose agent for drafting documentation, prompts, release notes, specifications, and structured text.",
     temperature: 0.3,
     permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
   pinoox: {
     description: "Unified Pinoox agent that auto-selects architecture, app, migration, UI, security, docs, or marketplace behavior.",
-    mode: "all",
+    mode: "primary",
+    prompt: "Act as the unified Pinoox agent from pinoox/agent-pack. Auto-select the right behavior for architecture, single-app building, app building, migration, UI, security review, documentation, or marketplace publishing. Detect platform vs single-app Pinx project shape, use pinoox-mcp when available, avoid editing vendor/pinoox/pincore for app work unless explicitly requested, and keep guidance specific to Pinoox.",
     temperature: 0.15,
     permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
   }
@@ -530,7 +534,7 @@ function normalizeSelectableAgents(agents: Record<string, unknown>) {
   for (const key of ["ask", "debugger", "compose", "pinoox"]) {
     const agent = next[key];
     if (agent && typeof agent === "object" && !Array.isArray(agent)) {
-      next[key] = { ...(agent as Record<string, unknown>), mode: "all" };
+      next[key] = { ...(agent as Record<string, unknown>), mode: "primary" };
     }
   }
   return next;
