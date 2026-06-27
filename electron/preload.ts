@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("studio", {
   checkMimo: () => ipcRenderer.invoke("mimo:check"),
   readProjectConfig: (folder: string) => ipcRenderer.invoke("config:read", folder),
   saveProjectConfig: (payload: unknown) => ipcRenderer.invoke("config:save", payload),
+  setProjectTrust: (payload: unknown) => ipcRenderer.invoke("config:setTrust", payload),
   runMimo: (payload: unknown) => {
     console.log("[preload] runMimo called");
     return ipcRenderer.invoke("mimo:run", payload);

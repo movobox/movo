@@ -860,6 +860,15 @@ ipcMain.handle("config:save", (_event, payload: { folder: string; appSettings: A
   return { ok: true };
 });
 
+ipcMain.handle("config:setTrust", (_event, payload: { folder: string; trusted: boolean }) => {
+  try {
+    setProjectTrustMarker(payload.folder, payload.trusted);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("mimo:check", async () => {
   const binary = findMimoBinary();
   if (!binary) return { installed: false, version: "" };
@@ -1084,13 +1093,21 @@ function engineDatabasePath() {
   return join(engineProfileRoot(), "data", "movo.db");
 }
 
+function engineConfigPath() {
+  return join(engineProfileRoot(), "config", "movo-engine.json");
+}
+
 function buildMimoEnvironment(projectFolder: string, appSettings: AppSettings): Record<string, string> {
   const trusted = isProjectTrusted(appSettings, projectFolder);
   const config = buildEngineConfig(projectFolder, appSettings, trusted);
+  const configPath = engineConfigPath();
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
   const env: Record<string, string> = {
     [`${ENGINE_ENV_PREFIX}_HOME`]: engineProfileRoot(),
     [`${ENGINE_ENV_PREFIX}_DB`]: engineDatabasePath(),
-    [`${ENGINE_ENV_PREFIX}_CONFIG_CONTENT`]: JSON.stringify(config),
+    [`${ENGINE_ENV_PREFIX}_CONFIG`]: configPath,
+    [`${ENGINE_ENV_PREFIX}_CONFIG_DIR`]: dirname(configPath),
     [`${ENGINE_ENV_PREFIX}_DISABLE_PROJECT_CONFIG`]: "true"
   };
   return env;
@@ -1317,6 +1334,27 @@ function writeProjectConfig(folder: string, appSettings: AppSettings) {
   if (!file) return;
   mkdirSync(dirname(file), { recursive: true });
   const config = buildEngineConfig(folder, appSettings, true);
+  config.movo = {
+    ...(config.movo && typeof config.movo === "object" && !Array.isArray(config.movo) ? config.movo as Record<string, unknown> : {}),
+    trusted: true,
+    trustedAt: new Date().toISOString()
+  };
+  writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
+}
+
+function setProjectTrustMarker(folder: string, trusted: boolean) {
+  const file = projectConfigPathForSettings(folder, defaultAppSettings);
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true });
+  let config: Record<string, unknown> = {};
+  if (existsSync(file)) {
+    try { config = JSON.parse(readFileSync(file, "utf8")); } catch { config = {}; }
+  }
+  config.movo = {
+    ...(config.movo && typeof config.movo === "object" && !Array.isArray(config.movo) ? config.movo as Record<string, unknown> : {}),
+    trusted,
+    trustedAt: trusted ? new Date().toISOString() : null
+  };
   writeFileSync(file, JSON.stringify(config, null, 2), "utf8");
 }
 

@@ -179,6 +179,10 @@ export const useStudioStore = defineStore("studio", () => {
     return Boolean(key && appSettings.value.trustedWorkspaces?.[key]);
   }
 
+  function projectConfigIsTrusted(config: unknown) {
+    return Boolean(config && typeof config === "object" && !Array.isArray(config) && (config as Record<string, any>).movo?.trusted === true);
+  }
+
   async function setFolderTrust(folder: string, trusted: boolean) {
     const key = normalizeFolderKey(folder);
     if (!key || key === translate("noProject")) return;
@@ -186,6 +190,7 @@ export const useStudioStore = defineStore("studio", () => {
     if (trusted) appSettings.value.trustedWorkspaces[key] = true;
     else delete appSettings.value.trustedWorkspaces[key];
     appSettings.value.trustWorkspace = false;
+    await window.studio.setProjectTrust?.({ folder: key, trusted });
     await saveAppSettings();
     if (trusted) {
       await window.studio.saveProjectConfig({ folder: key, appSettings: clone(appSettings.value) });
@@ -219,6 +224,7 @@ export const useStudioStore = defineStore("studio", () => {
     }
     appSettings.value.trustedWorkspaces = { ...(appSettings.value.trustedWorkspaces || {}) };
     delete appSettings.value.trustedWorkspaces[key];
+    await window.studio.setProjectTrust?.({ folder: key, trusted: false });
     folderMenuOpenFor.value = "";
     await saveAppSettings();
     await persistChats();
@@ -370,10 +376,17 @@ export const useStudioStore = defineStore("studio", () => {
     if (!folder) return;
     if (!activeChat.value) startNewChat(folder);
     else activeChat.value.folder = folder;
+    const existingConfig = await window.studio.readProjectConfig(folder);
+    if (existingConfig.ok && projectConfigIsTrusted(existingConfig.config)) {
+      appSettings.value.trustedWorkspaces = { ...(appSettings.value.trustedWorkspaces || {}), [folder]: true };
+      appSettings.value.trustWorkspace = false;
+      await saveAppSettings();
+    }
     if (isFolderTrusted(folder)) {
-      const existingConfig = await window.studio.readProjectConfig(folder);
       if (existingConfig.ok && existingConfig.raw) {
         appSettings.value = settingsFromProjectConfig(existingConfig.config);
+        appSettings.value.trustedWorkspaces = { ...(appSettings.value.trustedWorkspaces || {}), [folder]: true };
+        appSettings.value.trustWorkspace = false;
       }
       await window.studio.saveProjectConfig({ folder, appSettings: clone(appSettings.value) });
     }

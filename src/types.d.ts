@@ -177,6 +177,7 @@ declare global {
       checkMimo: () => Promise<{ installed: boolean; version: string }>;
       readProjectConfig: (folder: string) => Promise<{ ok: boolean; config: unknown; raw: string }>;
       saveProjectConfig: (payload: { folder: string; appSettings: AppSettings }) => Promise<{ ok: boolean; path: string }>;
+      setProjectTrust?: (payload: { folder: string; trusted: boolean }) => Promise<{ ok: boolean; error?: string }>;
       runMimo: (payload: {
         chat: Chat;
         message: string;
