@@ -101,7 +101,7 @@ const defaultAgents = {
   },
   ask: {
     description: "Answer questions, explain code, and inspect context without making changes unless explicitly asked.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.2,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -113,7 +113,7 @@ const defaultAgents = {
   },
   debugger: {
     description: "Trace runtime errors, logs, failing tests, and reproduction steps.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.1,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -141,9 +141,15 @@ const defaultAgents = {
     temperature: 0.15,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
+  compose: {
+    description: "Draft text, documentation, prompts, release notes, and structured content.",
+    mode: "all",
+    temperature: 0.3,
+    permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
   pinoox: {
     description: "Unified Pinoox agent that auto-selects architecture, app, migration, UI, security, docs, or marketplace behavior.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.15,
     permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
   }
@@ -442,7 +448,7 @@ function normalizeAppSettingsForMain(value: Partial<AppSettings> = {}): AppSetti
     experimental: { ...defaultAppSettings.experimental, ...(value.experimental || {}) }
   };
   settings.mcpServersJson = withoutDefaultObject(value.mcpServersJson || defaultAppSettings.mcpServersJson, defaultPinooxMcpServers);
-  settings.agentsJson = withoutDefaultObject(value.agentsJson || defaultAppSettings.agentsJson, defaultAgents);
+  settings.agentsJson = withoutDefaultObject(normalizeSelectableAgentModes(value.agentsJson || defaultAppSettings.agentsJson), defaultAgents);
   settings.commandsJson = withoutDefaultObject(value.commandsJson || defaultAppSettings.commandsJson, defaultCommands);
   settings.skillsJson = withoutDefaultSkills(value.skillsJson || defaultAppSettings.skillsJson);
   settings.toolJson = withoutDefaultObject(value.toolJson || defaultAppSettings.toolJson, defaultToolConfig);
@@ -488,6 +494,37 @@ function withDefaultObject(raw: string, defaults: Record<string, unknown>) {
   } catch {
     return raw || JSON.stringify(defaults, null, 2);
   }
+}
+
+function withDefaultAgents(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    const current = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    return JSON.stringify(normalizeSelectableAgents({ ...defaultAgents, ...current }), null, 2);
+  } catch {
+    return JSON.stringify(defaultAgents, null, 2);
+  }
+}
+
+function normalizeSelectableAgentModes(raw: string) {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw || "{}";
+    return JSON.stringify(normalizeSelectableAgents(parsed as Record<string, unknown>), null, 2);
+  } catch {
+    return raw || "{}";
+  }
+}
+
+function normalizeSelectableAgents(agents: Record<string, unknown>) {
+  const next = { ...agents };
+  for (const key of ["ask", "debugger", "compose", "pinoox"]) {
+    const agent = next[key];
+    if (agent && typeof agent === "object" && !Array.isArray(agent)) {
+      next[key] = { ...(agent as Record<string, unknown>), mode: "all" };
+    }
+  }
+  return next;
 }
 
 function withDefaultInstructions(raw: string) {
@@ -1242,7 +1279,7 @@ function buildEngineConfig(folder: string, appSettings: AppSettings, includeProj
   if (appSettings.model) config.model = appSettings.model;
   if (appSettings.agent) config.default_agent = appSettings.agent;
   mergeMcpConfig(config, withDefaultMcp(appSettings.mcpServersJson), folder);
-  mergeJsonConfig(config, "agent", withDefaultObject(appSettings.agentsJson, defaultAgents));
+  mergeJsonConfig(config, "agent", withDefaultAgents(appSettings.agentsJson));
   mergeJsonConfig(config, "command", withDefaultObject(appSettings.commandsJson, defaultCommands));
   mergeJsonConfig(config, "skills", withDefaultSkills(appSettings.skillsJson));
   mergeJsonConfig(config, "tool", withDefaultObject(appSettings.toolJson, defaultToolConfig));

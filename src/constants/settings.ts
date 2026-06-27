@@ -44,7 +44,7 @@ const defaultAgents = {
   },
   ask: {
     description: "Answer questions, explain code, and inspect context without making changes unless explicitly asked.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.2,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -56,7 +56,7 @@ const defaultAgents = {
   },
   debugger: {
     description: "Trace runtime errors, logs, failing tests, and reproduction steps.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.1,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
@@ -84,9 +84,15 @@ const defaultAgents = {
     temperature: 0.15,
     permission: { edit: "deny", bash: "ask", webfetch: "allow", websearch: "allow" }
   },
+  compose: {
+    description: "Draft text, documentation, prompts, release notes, and structured content.",
+    mode: "all",
+    temperature: 0.3,
+    permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
+  },
   pinoox: {
     description: "Unified Pinoox agent that auto-selects architecture, app, migration, UI, security, docs, or marketplace behavior.",
-    mode: "subagent",
+    mode: "all",
     temperature: 0.15,
     permission: { edit: "ask", bash: "ask", webfetch: "allow", websearch: "allow" }
   }
@@ -362,7 +368,7 @@ export function normalizeAppSettings(value: Partial<AppSettings> = {}): AppSetti
     watcher: { ...defaultSettings.watcher, ...(value.watcher || {}) },
     experimental: { ...defaultSettings.experimental, ...(value.experimental || {}) },
     mcpServersJson: withoutDefaultObject(value.mcpServersJson || defaultSettings.mcpServersJson, defaultPinooxMcpServers),
-    agentsJson: withoutDefaultObject(value.agentsJson || defaultSettings.agentsJson, defaultAgents),
+    agentsJson: withoutDefaultObject(normalizeSelectableAgentModes(value.agentsJson || defaultSettings.agentsJson), defaultAgents),
     commandsJson: withoutDefaultObject(value.commandsJson || defaultSettings.commandsJson, defaultCommands),
     skillsJson: withoutDefaultSkills(value.skillsJson || defaultSettings.skillsJson),
     toolJson: withoutDefaultObject(value.toolJson || defaultSettings.toolJson, defaultToolConfig),
@@ -409,6 +415,23 @@ function withDefaultObject(raw: string, defaults: Record<string, unknown>): stri
     return JSON.stringify({ ...defaults, ...current }, null, 2);
   } catch {
     return raw || JSON.stringify(defaults, null, 2);
+  }
+}
+
+function normalizeSelectableAgentModes(raw: string): string {
+  try {
+    const parsed = raw?.trim() ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw || "{}";
+    const next = { ...(parsed as Record<string, unknown>) };
+    for (const key of ["ask", "debugger", "compose", "pinoox"]) {
+      const agent = next[key];
+      if (agent && typeof agent === "object" && !Array.isArray(agent)) {
+        next[key] = { ...(agent as Record<string, unknown>), mode: "all" };
+      }
+    }
+    return JSON.stringify(next, null, 2);
+  } catch {
+    return raw || "{}";
   }
 }
 
