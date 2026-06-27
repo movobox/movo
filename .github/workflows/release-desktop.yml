@@ -1,0 +1,63 @@
+name: Release desktop installers
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build ${{ matrix.platform }} installer
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            script: build:win
+            assets: |
+              release/*.exe
+          - platform: macos
+            os: macos-latest
+            script: build:mac
+            assets: |
+              release/*.dmg
+          - platform: linux
+            os: ubuntu-latest
+            script: build:linux
+            assets: |
+              release/*.AppImage
+              release/*.deb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production installer
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.assets }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
