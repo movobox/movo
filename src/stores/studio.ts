@@ -1488,12 +1488,12 @@ function formatVisibleActivityResult(result: string) {
 
 function isPlainWriteSuccessResult(result: string) {
   const clean = stripAnsi(result).trim();
-  if (/^Wrote file successfully\.?$/i.test(clean)) return true;
+  if (/^(Wrote file successfully|Edit applied successfully)\.?$/i.test(clean)) return true;
   try {
     const parsed = JSON.parse(clean);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const value = String((parsed as Record<string, unknown>).value || "").trim();
-      return /^Wrote file successfully\.?$/i.test(value);
+      return /^(Wrote file successfully|Edit applied successfully)\.?$/i.test(value);
     }
   } catch {}
   return false;
@@ -1541,7 +1541,7 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
       if (structuredDetail?.result) lines.push(`<pre class="activity-log-result">${escapeHtml(structuredDetail.result)}</pre>`);
       if (structuredDetail?.extra) lines.push(formatActivityDetail(structuredDetail.extra, true));
       if (activity.detail && !structuredDetail) lines.push(formatActivityDetail(activity.detail, true));
-    } else if (activity.detail) {
+    } else if (activity.detail && !(activity.oldCode || activity.newCode)) {
       lines.push(formatActivityDetail(activity.detail));
     }
     if (activity.oldCode || activity.newCode) {
@@ -1552,7 +1552,7 @@ function formatRunActivities(activities: { text: string; detail: string; code?: 
       if (activity.newCode) {
         diffLines.push(...truncateActivityCode(activity.newCode).split("\n").map((line) => `+${line}`));
       }
-      lines.push(renderActivityLogCode(diffLines.join("\n"), "diff", "diff"));
+      lines.push(renderActivityLogDiff(diffLines.join("\n")));
     }
     lines.push(`</section>`);
   }
@@ -1565,6 +1565,17 @@ function renderActivityLogCode(code: string, lang: string, className = "") {
   const normalizedLang = lang || "text";
   const classAttr = ["activity-log-code", className].filter(Boolean).join(" ");
   return `<pre class="${escapeHtml(classAttr)}" dir="ltr"><code class="language-${escapeHtml(normalizedLang)}">${highlightCode(truncateActivityCode(code), normalizedLang)}</code></pre>`;
+}
+
+function renderActivityLogDiff(diff: string) {
+  const html = diff.split("\n").map((line) => {
+    const escaped = escapeHtml(line);
+    if (line.startsWith("+") && !line.startsWith("+++")) return `<span class="diff-add">${escaped}</span>`;
+    if (line.startsWith("-") && !line.startsWith("---")) return `<span class="diff-del">${escaped}</span>`;
+    if (line.startsWith("@@")) return `<span class="diff-hunk">${escaped}</span>`;
+    return escaped;
+  }).join("\n");
+  return `<pre class="activity-log-code diff" dir="ltr"><code class="language-diff">${html}</code></pre>`;
 }
 
 function activityLogKind(text: string, detail: string, meta: { code?: string; oldCode?: string; newCode?: string; editFilePath?: string }) {

@@ -1064,6 +1064,38 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 .activity-log-code.diff {
   color: #cbd5e1;
 }
+.activity-log-code .hl-kw { color: #c084fc; font-weight: 500; }
+.activity-log-code .hl-str { color: #86efac; }
+.activity-log-code .hl-num { color: #fbbf24; }
+.activity-log-code .hl-cmt { color: #6b7280; font-style: italic; }
+.activity-log-code .hl-fn { color: #60a5fa; }
+.activity-log-code .hl-tag { color: #f87171; }
+.activity-log-code .hl-prop { color: #67e8f9; }
+.activity-log-code .hl-op { color: #94a3b8; }
+.activity-log-code .hl-punct { color: #71717a; }
+.activity-log-code .diff-add {
+  display: block;
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-left: 3px solid #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+}
+.activity-log-code .diff-del {
+  display: block;
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+}
+.activity-log-code .diff-hunk {
+  display: block;
+  margin: 0 -10px;
+  padding: 0 10px;
+  color: #818cf8;
+  background: rgba(99, 102, 241, 0.08);
+}
 .activity-log-result {
   margin: 8px 0 0;
   padding: 7px 10px;

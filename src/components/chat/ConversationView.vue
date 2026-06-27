@@ -130,12 +130,12 @@ function activityDetailParts(detail = "") {
 
 function formatVisibleActivityResult(result: string) {
   if (!result) return "";
-  if (/^Wrote file successfully\.?$/i.test(result.trim())) return "";
+  if (/^(Wrote file successfully|Edit applied successfully)\.?$/i.test(result.trim())) return "";
   try {
     const parsed = JSON.parse(result);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const value = String((parsed as Record<string, unknown>).value || "").trim();
-      if (/^Wrote file successfully\.?$/i.test(value)) return "";
+      if (/^(Wrote file successfully|Edit applied successfully)\.?$/i.test(value)) return "";
     }
   } catch {}
   return result;
