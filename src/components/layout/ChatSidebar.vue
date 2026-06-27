@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Folder, FolderOpen, Pencil, Plus, Settings, ShieldCheck, ShieldOff, Trash2 } from "@lucide/vue";
+import { Ellipsis, Folder, FolderOpen, Pencil, Plus, Settings, ShieldCheck, ShieldOff, Trash2 } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 
@@ -21,17 +21,31 @@ const { t } = useI18n();
             <Folder :size="14" />
             <span>{{ group.name }}</span>
           </div>
-          <button
-            v-if="group.folder !== t('noProject')"
-            class="folder-trust-btn"
-            :class="{ trusted: group.trusted }"
-            type="button"
-            :title="group.trusted ? 'Disable trust for this folder' : 'Trust this folder'"
-            @click.stop="studio.toggleFolderTrust(group.folder)"
-          >
-            <component :is="group.trusted ? ShieldCheck : ShieldOff" :size="12" />
-            <span>{{ group.trusted ? 'Trusted' : 'Trust' }}</span>
-          </button>
+          <div v-if="group.folder !== t('noProject')" class="folder-menu-wrap">
+            <button
+              class="folder-menu-btn"
+              :class="{ trusted: group.trusted }"
+              type="button"
+              title="Folder actions"
+              @click.stop="studio.folderMenuOpenFor = studio.folderMenuOpenFor === group.folder ? '' : group.folder"
+            >
+              <Ellipsis :size="15" />
+            </button>
+            <div v-if="studio.folderMenuOpenFor === group.folder" class="folder-menu" @click.stop>
+              <button type="button" @click="studio.toggleFolderTrust(group.folder)">
+                <component :is="group.trusted ? ShieldOff : ShieldCheck" :size="13" />
+                <span>{{ group.trusted ? 'Untrust folder' : 'Trust folder' }}</span>
+              </button>
+              <button type="button" @click="studio.openFolderPath(group.folder)">
+                <FolderOpen :size="13" />
+                <span>Open folder</span>
+              </button>
+              <button class="danger" type="button" @click="studio.deleteFolderChats(group.folder)">
+                <Trash2 :size="13" />
+                <span>Delete folder chats</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-for="chat in group.items" :key="chat.id" class="session-row">

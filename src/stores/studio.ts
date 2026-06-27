@@ -26,6 +26,7 @@ export const useStudioStore = defineStore("studio", () => {
   const showAgentMenu = ref(false);
   const showModelMenu = ref(false);
   const deleteConfirmId = ref("");
+  const folderMenuOpenFor = ref("");
   type RunActivity = { text: string; detail: string; code?: string; codeLang?: string; oldCode?: string; newCode?: string; editFilePath?: string };
   type TimelineItem =
     | { kind: "text"; text: string }
@@ -193,6 +194,35 @@ export const useStudioStore = defineStore("studio", () => {
 
   async function toggleFolderTrust(folder: string) {
     await setFolderTrust(folder, !isFolderTrusted(folder));
+    folderMenuOpenFor.value = "";
+  }
+
+  async function openFolderPath(folder: string) {
+    const key = normalizeFolderKey(folder);
+    if (!key || key === translate("noProject")) return;
+    folderMenuOpenFor.value = "";
+    await window.studio.openPath(key);
+  }
+
+  async function deleteFolderChats(folder: string) {
+    const key = normalizeFolderKey(folder);
+    if (!key || key === translate("noProject")) return;
+    chats.value = chats.value.filter((chat) => chat.folder !== key);
+    if (activeChat.value?.folder === key) {
+      if (!chats.value.length) {
+        draftChat.value = makeChat(translate("untitled"));
+        activeChatId.value = "";
+      } else {
+        draftChat.value = null;
+        activeChatId.value = chats.value[0].id;
+      }
+    }
+    appSettings.value.trustedWorkspaces = { ...(appSettings.value.trustedWorkspaces || {}) };
+    delete appSettings.value.trustedWorkspaces[key];
+    folderMenuOpenFor.value = "";
+    await saveAppSettings();
+    await persistChats();
+    await persistUiState();
   }
 
   function schedulePersistence() {
@@ -1225,6 +1255,7 @@ export const useStudioStore = defineStore("studio", () => {
     terminalFloating,
     showAgentMenu,
     showModelMenu,
+    folderMenuOpenFor,
     deleteConfirmId,
     streamingText,
     runActivities,
@@ -1263,6 +1294,8 @@ export const useStudioStore = defineStore("studio", () => {
     chatRunStatus,
     isFolderTrusted,
     toggleFolderTrust,
+    openFolderPath,
+    deleteFolderChats,
     lineDir,
     relativeTime,
     updateScrollState,
