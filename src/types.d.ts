@@ -22,6 +22,7 @@ export type ChatAttachment = {
   mime: string;
   size: number;
   previewUrl?: string;
+  filePreviewUrl?: string;
 };
 
 export type Chat = {
@@ -128,6 +129,7 @@ export type FileInspectResult = {
   isCode: boolean;
   mentionable: boolean;
   previewUrl?: string;
+  filePreviewUrl?: string;
   error?: string;
 };
 

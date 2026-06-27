@@ -9,6 +9,7 @@ const { t } = useI18n();
 const dragOver = ref(false);
 const inputMirror = ref<HTMLElement | null>(null);
 const composerInput = ref<HTMLTextAreaElement | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
 const mentionTooltip = ref({ visible: false, text: "", x: 0, y: 0 });
 
 function onDragOver(e: DragEvent) {
@@ -27,20 +28,18 @@ function onDrop(e: DragEvent) {
     void attachDroppedFile(file);
   }
 }
-async function attachFiles() {
-  try {
-    const files = await window.studio.pickFiles();
-    if (!files || !Array.isArray(files)) return;
-    for (const f of files) {
-      if (typeof f === "string") {
-        await attachPath(f);
-      } else if (f?.ok) {
-        attachInspectedFile(f);
-      }
-    }
-  } catch (e) {
-    console.error("[composer] attachFiles error:", e);
+function attachFiles() {
+  fileInput.value?.click();
+}
+
+function handleFileInputChange(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  const files = input?.files;
+  if (!files) return;
+  for (const file of files) {
+    void attachDroppedFile(file);
   }
+  if (input) input.value = "";
 }
 
 function sendFromButton() {
@@ -68,7 +67,8 @@ async function attachPath(path: string) {
         kind: info.isImage ? "image" : "binary",
         mime: info.mime,
         size: info.size,
-        previewUrl: info.previewUrl
+        previewUrl: info.previewUrl,
+        filePreviewUrl: info.filePreviewUrl
       });
       return;
     }
@@ -89,6 +89,7 @@ function attachInspectedFile(info: {
   mime: string;
   size: number;
   previewUrl?: string;
+  filePreviewUrl?: string;
 }) {
   if (info.mentionable) {
     insertMentionAtCursor(info.path);
@@ -100,13 +101,15 @@ function attachInspectedFile(info: {
     kind: info.isImage ? "image" : "binary",
     mime: info.mime,
     size: info.size,
-    previewUrl: info.previewUrl
+    previewUrl: info.previewUrl,
+    filePreviewUrl: info.filePreviewUrl
   });
 }
 
 async function attachDroppedFile(file: File) {
   const path = window.studio.getPathForFile?.(file) || (file as any).path || file.name;
   if (!path || typeof path !== "string") return;
+  const filePreview = isImageFile(file, path) ? URL.createObjectURL(file) : undefined;
   const hasRealPath = isAbsolutePath(path);
   let resolved = hasRealPath ? path : "";
   if (!resolved && window.studio.saveDroppedFile) {
@@ -115,7 +118,7 @@ async function attachDroppedFile(file: File) {
       if (saved.ok && saved.path) resolved = saved.path;
     } catch {}
   }
-  if (!resolved) resolved = resolveInputPath(path);
+  if (!resolved) resolved = path;
   if (isCodeLikePath(resolved)) {
     insertMentionAtCursor(resolved);
     return;
@@ -131,7 +134,8 @@ async function attachDroppedFile(file: File) {
         kind: info.isImage || file.type.startsWith("image/") ? "image" : "binary",
         mime: info.mime || file.type || "application/octet-stream",
         size: info.size || file.size,
-        previewUrl: info.previewUrl || (file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined)
+        previewUrl: filePreview || info.previewUrl,
+        filePreviewUrl: info.filePreviewUrl || previewUrlForPath(info.path)
       });
     }
   } catch {}
@@ -139,10 +143,11 @@ async function attachDroppedFile(file: File) {
   studio.addDraftAttachment({
     path: resolved,
     name: file.name || fileName(resolved),
-    kind: file.type.startsWith("image/") || isImageLikePath(resolved) ? "image" : "binary",
+    kind: isImageFile(file, resolved) ? "image" : "binary",
     mime: file.type || (isImageLikePath(resolved) ? "image/*" : "application/octet-stream"),
     size: file.size,
-    previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : previewUrlForPath(resolved)
+    previewUrl: filePreview || previewUrlForPath(resolved),
+    filePreviewUrl: previewUrlForPath(resolved)
   });
 }
 
@@ -395,6 +400,10 @@ function isImageLikePath(path: string) {
   return imageLikeExts.has(ext);
 }
 
+function isImageFile(file: File, path: string) {
+  return file.type.startsWith("image/") || isImageLikePath(path);
+}
+
 function previewUrlForPath(path: string) {
   return isImageLikePath(path) && isAbsolutePath(path) ? `movo-file://preview?path=${encodeURIComponent(path)}` : undefined;
 }
@@ -407,6 +416,7 @@ function resolveMentionPath(token: string) {
 }
 
 function formatSize(bytes: number) {
+  if (!bytes) return "Reading size...";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -446,7 +456,12 @@ function formatSize(bytes: number) {
         class="attachment-card"
         :title="attachment.path"
       >
-        <img v-if="attachment.kind === 'image' && attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
+        <img
+          v-if="attachment.kind === 'image' && (attachment.previewUrl || attachment.filePreviewUrl)"
+          :src="attachment.previewUrl || attachment.filePreviewUrl"
+          :alt="attachment.name"
+          @error="attachment.previewUrl = attachment.filePreviewUrl || ''; studio.addDraftAttachment(attachment)"
+        />
         <div v-else class="attachment-file-icon">
           <ImageIcon v-if="attachment.kind === 'image'" :size="18" />
           <File v-else :size="18" />
@@ -508,6 +523,13 @@ function formatSize(bytes: number) {
 
     <div class="composer-bar">
       <div class="bar-left">
+        <input
+          ref="fileInput"
+          class="hidden-file-input"
+          type="file"
+          multiple
+          @change="handleFileInputChange"
+        />
         <button class="sel-btn icon-label" type="button" title="Attach files" @click="attachFiles">
           <Paperclip :size="12" />
         </button>

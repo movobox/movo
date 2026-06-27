@@ -53,6 +53,10 @@ type Chat = {
 type UiState = { activeChatId: string; draftChat: Chat | null };
 type Settings = { app: AppSettings; chats: Chat[]; ui: UiState };
 
+protocol.registerSchemesAsPrivileged([
+  { scheme: "movo-file", privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: true } }
+]);
+
 const defaultPinooxMcpServers = {
   pinoox: {
     type: "local",
@@ -835,7 +839,7 @@ ipcMain.handle("mimo:run", (_event, payload: { chat: Chat; message: string; appS
       const trimmed = f.trim();
       if (!trimmed) return false;
       const candidate = existsSync(trimmed) ? trimmed : join(projectFolder, trimmed.replace(/^@/, ""));
-      try { return existsSync(candidate) ? candidate : false; } catch { return false; }
+      try { return existsSync(candidate) ? resolve(candidate) : false; } catch { return false; }
     }).filter((f): f is string => typeof f === "string");
     const uniqueFiles = uniquePaths(validFiles);
     if (validFiles.length > 0) {
@@ -1153,7 +1157,10 @@ function inspectAttachmentFile(filePath: string) {
       isCode,
       mentionable: isCode && stat.size <= 2_000_000
     };
-    if (isImage) result.previewUrl = `movo-file://preview?path=${encodeURIComponent(clean)}`;
+    if (isImage) {
+      result.filePreviewUrl = `movo-file://preview?path=${encodeURIComponent(clean)}`;
+      result.previewUrl = `data:${mime};base64,${readFileSync(clean).toString("base64")}`;
+    }
     return result;
   } catch (e) {
     return { ok: false, path: String(filePath || ""), name: basename(String(filePath || "")), size: 0, ext: "", mime: "", isImage: false, isBinary: true, isCode: false, mentionable: false, error: String(e) };

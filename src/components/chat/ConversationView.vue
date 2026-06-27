@@ -43,7 +43,7 @@ function openInExplorer(filePath: string) {
   void window.studio.openPath(filePath);
 }
 
-async function enrichAttachment(attachment: { path: string; name: string; kind: "image" | "binary"; mime: string; size: number; previewUrl?: string }) {
+async function enrichAttachment(attachment: { path: string; name: string; kind: "image" | "binary"; mime: string; size: number; previewUrl?: string; filePreviewUrl?: string }) {
   if (!window.studio.inspectFile) return;
   try {
     const info = await window.studio.inspectFile(attachment.path);
@@ -52,13 +52,14 @@ async function enrichAttachment(attachment: { path: string; name: string; kind: 
     attachment.name = info.name || attachment.name;
     attachment.kind = info.isImage ? "image" : attachment.kind;
     attachment.mime = info.mime || attachment.mime;
-    attachment.size = info.size || attachment.size;
+    if (Number.isFinite(info.size) && info.size > 0) attachment.size = info.size;
     attachment.previewUrl = info.previewUrl || attachment.previewUrl;
+    attachment.filePreviewUrl = info.filePreviewUrl || attachment.filePreviewUrl;
   } catch {}
 }
 
 function formatSize(bytes: number) {
-  if (!bytes) return "Unknown size";
+  if (!bytes) return "Reading size...";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -129,7 +130,12 @@ function truncateCode(code: string, maxLines = 40): string {
                   :title="attachment.path"
                   @click="openInExplorer(attachment.path)"
                 >
-                  <img v-if="attachment.kind === 'image' && attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
+                  <img
+                    v-if="attachment.kind === 'image' && (attachment.previewUrl || attachment.filePreviewUrl)"
+                    :src="attachment.previewUrl || attachment.filePreviewUrl"
+                    :alt="attachment.name"
+                    @error="attachment.previewUrl = attachment.filePreviewUrl || ''; enrichAttachment(attachment)"
+                  />
                   <div v-else class="attachment-file-icon">
                     <ImageIcon v-if="attachment.kind === 'image'" :size="18" />
                     <File v-else :size="18" />

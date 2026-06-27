@@ -864,7 +864,8 @@ export const useStudioStore = defineStore("studio", () => {
       kind: isImageLikePath(clean) ? "image" : "binary",
       mime: isImageLikePath(clean) ? "image/*" : "application/octet-stream",
       size: 0,
-      previewUrl: isImageLikePath(clean) && isAbsolutePath(clean) ? `movo-file://preview?path=${encodeURIComponent(clean)}` : undefined
+      previewUrl: isImageLikePath(clean) && isAbsolutePath(clean) ? `movo-file://preview?path=${encodeURIComponent(clean)}` : undefined,
+      filePreviewUrl: isImageLikePath(clean) && isAbsolutePath(clean) ? `movo-file://preview?path=${encodeURIComponent(clean)}` : undefined
     });
   }
 
@@ -882,7 +883,12 @@ export const useStudioStore = defineStore("studio", () => {
   function addDraftAttachment(attachment: Omit<ChatAttachment, "id"> & { id?: string }) {
     const cleanPath = attachment.path.trim();
     if (!cleanPath) return;
-    if (draftAttachments.value.some((item) => item.path === cleanPath)) return;
+    const existing = draftAttachments.value.find((item) => item.path === cleanPath);
+    if (existing) {
+      mergeAttachment(existing, attachment);
+      void enrichAttachment(existing);
+      return;
+    }
     const item = {
       id: attachment.id || uid(),
       path: cleanPath,
@@ -890,10 +896,20 @@ export const useStudioStore = defineStore("studio", () => {
       kind: attachment.kind,
       mime: attachment.mime || (attachment.kind === "image" ? "image/*" : "application/octet-stream"),
       size: Number.isFinite(attachment.size) ? attachment.size : 0,
-      previewUrl: attachment.previewUrl
+      previewUrl: attachment.previewUrl,
+      filePreviewUrl: attachment.filePreviewUrl
     };
     draftAttachments.value.push(item);
     void enrichAttachment(item);
+  }
+
+  function mergeAttachment(target: ChatAttachment, source: Omit<ChatAttachment, "id"> & { id?: string }) {
+    target.name = source.name || target.name;
+    target.kind = source.kind || target.kind;
+    target.mime = source.mime || target.mime;
+    if (Number.isFinite(source.size) && source.size > 0) target.size = source.size;
+    if (source.previewUrl) target.previewUrl = source.previewUrl;
+    if (source.filePreviewUrl) target.filePreviewUrl = source.filePreviewUrl;
   }
 
   async function enrichAttachment(attachment: ChatAttachment) {
@@ -906,8 +922,9 @@ export const useStudioStore = defineStore("studio", () => {
       attachment.name = info.name || attachment.name;
       attachment.kind = info.isImage ? "image" : attachment.kind;
       attachment.mime = info.mime || attachment.mime;
-      attachment.size = info.size || attachment.size;
+      if (Number.isFinite(info.size) && info.size > 0) attachment.size = info.size;
       attachment.previewUrl = info.previewUrl || attachment.previewUrl;
+      attachment.filePreviewUrl = info.filePreviewUrl || attachment.filePreviewUrl;
     } catch {}
   }
 
