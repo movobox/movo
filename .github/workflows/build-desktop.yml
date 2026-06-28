@@ -1,40 +1,15 @@
-name: Build desktop apps
+name: Check desktop app
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: Build ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: false
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            os: windows-latest
-            script: build:win
-            artifact: release-windows
-          - platform: linux
-            os: ubuntu-latest
-            script: build:linux
-            artifact: release-linux
-          - platform: macos
-            os: macos-latest
-            script: build:mac
-            artifact: release-macos
+  check:
+    name: Typecheck
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -49,16 +24,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Clean previous release output
-        shell: pwsh
-        run: Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
-
-      - name: Build
-        run: npm run ${{ matrix.script }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: release/**
-          if-no-files-found: error
+      - name: Run typecheck
+        run: npm run typecheck
