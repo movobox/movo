@@ -30,7 +30,7 @@
   <img src="docs/assets/movo-preview.png" alt="Movo desktop preview">
 </p>
 
-Movo is a focused desktop workspace for building and maintaining software with AI. It combines a project-aware chat, real terminals, live activity logs, file mentions, attachments, dev servers, agents, MCP integrations, and Pinoox workflows in one app.
+Movo is a focused desktop workspace for building and maintaining software with AI. It combines a project-aware chat, real terminals, live activity logs, file mentions, attachments, dev servers, agents, MCP integrations, and workflows in one app.
 
 Movo has its own identity, UI, settings, and workflow layer. Under the hood, it is powered in part by Xiaomi's MiMo Code engine for AI coding execution.
 
