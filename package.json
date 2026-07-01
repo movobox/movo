@@ -1,20 +1,20 @@
 {
   "name": "movo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Movo desktop AI studio for Pinoox.",
   "main": "dist-electron/main.js",
   "type": "module",
   "author": {
-  "name": "yoosef alipour",
-  "email": "yoosefalipour@gmail.com"
-   },
+    "name": "yoosef alipour",
+    "email": "yoosefalipour@gmail.com"
+  },
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "build": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder",
     "build:dir": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir",
     "build:win": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "build:win:vs": "cmd /d /s /c \"\\\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\\\" -arch=x64 -host_arch=x64 && npm run build:win\"",
-    "build:mac": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "build:mac": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && electron-builder --mac",
     "build:linux": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.preload.json --noEmit"
@@ -33,6 +33,7 @@
     "vue-i18n": "^11.4.6"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.7",
@@ -80,12 +81,22 @@
       "shortcutName": "Movo"
     },
     "mac": {
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "Movo-Installer-macOS.${ext}",
       "target": [
         "dmg",
         "zip"
       ]
     },
+    "afterSign": "scripts/notarize.mjs",
     "linux": {
+      "artifactName": "Movo-Linux.${ext}",
+      "executableName": "movo",
+      "maintainer": "yoosef alipour <yoosefalipour@gmail.com>",
+      "synopsis": "Movo desktop AI studio",
       "target": [
         "AppImage",
         "deb"

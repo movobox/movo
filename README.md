@@ -39,6 +39,7 @@ Movo has its own identity, UI, settings, and workflow layer. Under the hood, it 
 - [Download](#download)
 - [Preview](#preview)
 - [Support Movo](#support-movo)
+- [Linux Notes](#linux-notes)
 - [Why Movo](#why-movo)
 - [Features](#features)
 - [Chat Workspace](#chat-workspace)
@@ -62,6 +63,22 @@ Use the direct links below to download the latest published installer. The [late
 | Linux | `.deb` | [Movo-Linux.deb](../../releases/latest/download/Movo-Linux.deb) | Shown on the [latest release](../../releases/latest) |
 
 Direct download links always point to the newest published release because the release workflow uploads stable asset names.
+
+## Linux Notes
+
+Movo is published for Linux as both AppImage and deb:
+
+- Use `Movo-Linux.AppImage` for a portable build.
+- Use `Movo-Linux.deb` on Debian/Ubuntu-based distributions.
+
+For AppImage, make the file executable before running it:
+
+```bash
+chmod +x Movo-Linux.AppImage
+./Movo-Linux.AppImage
+```
+
+If your distribution does not support AppImage/FUSE out of the box, use the `.deb` package where supported.
 
 ## Preview
 

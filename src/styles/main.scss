@@ -2427,16 +2427,19 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
 
 .composer-input-wrap {
   position: relative;
-  min-height: 40px;
+  min-height: 44px;
 }
 .composer-input-mirror,
 .composer textarea {
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
+  max-height: 156px;
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  padding: 0;
+  box-sizing: border-box;
 }
 .composer-input-mirror {
   position: absolute;
@@ -2454,6 +2457,16 @@ button:disabled { cursor: not-allowed; opacity: 0.35; }
   color: transparent;
   caret-color: #f4f4f5;
   -webkit-text-fill-color: transparent;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+.composer textarea::-webkit-scrollbar { width: 8px; }
+.composer textarea::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 .composer textarea::placeholder { color: #444; }
 .composer textarea:placeholder-shown {

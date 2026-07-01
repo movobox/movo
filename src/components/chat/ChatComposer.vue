@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Bot, Bug, ChevronDown, CircleHelp, File, FileJson, GitFork, ImageIcon, Lightbulb, Paperclip, Pencil, Play, Square, Trash2, Upload, Wrench, X } from "@lucide/vue";
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useStudioStore } from "../../stores/studio";
 
@@ -22,6 +22,8 @@ const agentOptions = [
 ];
 
 const currentAgentOption = computed(() => agentOptions.find((option) => option.value === studio.appSettings.agent) || agentOptions[0]);
+const composerMinHeight = 44;
+const composerMaxHeight = 156;
 
 function onDragOver(e: DragEvent) {
   e.preventDefault();
@@ -59,6 +61,16 @@ function sendFromButton() {
     return;
   }
   void studio.runPrompt();
+}
+
+function resizeComposerInput() {
+  const input = composerInput.value;
+  if (!input) return;
+  input.style.height = "auto";
+  const nextHeight = Math.min(Math.max(input.scrollHeight, composerMinHeight), composerMaxHeight);
+  input.style.height = `${nextHeight}px`;
+  input.style.overflowY = input.scrollHeight > composerMaxHeight ? "auto" : "hidden";
+  syncMirrorScroll();
 }
 
 function openImagePreview(attachment: { path: string; name: string; previewUrl?: string; filePreviewUrl?: string }) {
@@ -199,6 +211,7 @@ function insertMentionAtCursor(path: string) {
   void nextTick(() => {
     input?.focus();
     input?.setSelectionRange(nextCursor, nextCursor);
+    resizeComposerInput();
     syncMirrorScroll();
   });
 }
@@ -276,6 +289,7 @@ function handleComposerPaste(e: ClipboardEvent) {
     input.focus();
     input.setSelectionRange(nextCursor, nextCursor);
     studio.updateFilePickerFromDraft();
+    resizeComposerInput();
     syncMirrorScroll();
   });
 }
@@ -338,6 +352,7 @@ function removeMentionFromKey(e: KeyboardEvent) {
   void nextTick(() => {
     input.setSelectionRange(nextCursor, nextCursor);
     input.focus();
+    resizeComposerInput();
     syncMirrorScroll();
   });
   return true;
@@ -442,6 +457,14 @@ function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+onMounted(() => {
+  resizeComposerInput();
+});
+
+watch(() => studio.activeDraft, () => {
+  void nextTick(resizeComposerInput);
+});
 </script>
 
 <template>
@@ -522,7 +545,7 @@ function formatSize(bytes: number) {
         rows="2"
         @keydown="handleComposerKeydown"
         @paste="handleComposerPaste"
-        @input="studio.updateFilePickerFromDraft"
+        @input="resizeComposerInput(); studio.updateFilePickerFromDraft()"
         @scroll="syncMirrorScroll"
       />
       <div

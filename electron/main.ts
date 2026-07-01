@@ -625,8 +625,22 @@ function createWindow() {
     icon: appIconPath(),
     webPreferences: {
       preload: join(__dirname, "preload.js"),
-      contextIsolation: true, nodeIntegration: false
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false
     }
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?:|mailto:|ton:)/i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const allowedDevUrl = isDev && url.startsWith("http://localhost:5173");
+    const allowedFileUrl = !isDev && url.startsWith("file://");
+    if (allowedDevUrl || allowedFileUrl) return;
+    event.preventDefault();
+    if (/^(https?:|mailto:|ton:)/i.test(url)) void shell.openExternal(url);
   });
   if (process.platform === "darwin") app.dock?.setIcon(appIconPath());
   if (isDev) {

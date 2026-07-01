@@ -463,7 +463,13 @@ export const useStudioStore = defineStore("studio", () => {
 
     const contextFiles = extractMentionedFiles(requestText, projectFiles.value);
     const mentions = Array.from(requestText.matchAll(/@([^\s`"'<>]+)/g)).map((m) => m[1]);
-    const unresolvedMentions = mentions.filter((m) => !contextFiles.some((f) => f === m || f.endsWith("/" + m) || f.endsWith("\\" + m)));
+    const droppedMentionFiles = mentions
+      .map((mention) => droppedFiles.value.find((file) => file === mention || fileNameFromPath(file) === mention))
+      .filter((file): file is string => Boolean(file));
+    const unresolvedMentions = mentions.filter((m) => {
+      return !contextFiles.some((f) => f === m || f.endsWith("/" + m) || f.endsWith("\\" + m))
+        && !droppedMentionFiles.some((f) => f === m || fileNameFromPath(f) === m);
+    });
     const resolvedFromFs: string[] = [];
     const projectFolder = chat.folder || "";
     for (const mention of unresolvedMentions) {
@@ -475,7 +481,7 @@ export const useStudioStore = defineStore("studio", () => {
     await Promise.all(draftAttachments.value.map((attachment) => enrichAttachment(attachment)));
     const outgoingAttachments = clone(draftAttachments.value);
     const attachedFiles = outgoingAttachments.map((attachment) => attachment.path);
-    const allExtraFiles = [...new Set([...contextFiles, ...droppedFiles.value, ...resolvedFromFs, ...attachedFiles])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
+    const allExtraFiles = [...new Set([...contextFiles, ...droppedMentionFiles, ...droppedFiles.value, ...resolvedFromFs, ...attachedFiles])].filter((f) => f && typeof f === "string" && f.trim().length > 0);
     const promptText = withAttachmentContext(requestText, outgoingAttachments);
     droppedFiles.value = [];
     draftAttachments.value = [];
