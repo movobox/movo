@@ -1,6 +1,6 @@
 {
   "name": "movo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Movo desktop AI studio for Pinoox.",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -104,7 +104,15 @@
       "category": "Development"
     }
   },
+  "overrides": {
+    "esbuild": "0.28.1"
+  },
   "allowScripts": {
+    "@mimo-ai/cli@0.1.1": true,
+    "@parcel/watcher@2.5.6": true,
+    "electron@39.8.10": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.1": true,
     "node-pty@1.1.0": true
   }
 }
