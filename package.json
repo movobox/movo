@@ -1,6 +1,6 @@
 {
   "name": "movo",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Movo desktop AI studio for Pinoox.",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -15,6 +15,7 @@
     "build:win": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "build:win:vs": "cmd /d /s /c \"\\\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\\\" -arch=x64 -host_arch=x64 && npm run build:win\"",
     "build:mac": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && electron-builder --mac",
+    "build:mac:unsigned": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false CSC_LINK= CSC_KEY_PASSWORD= APPLE_ID= APPLE_APP_SPECIFIC_PASSWORD= APPLE_TEAM_ID= electron-builder --mac -c.mac.identity=null -c.afterSign=null",
     "build:linux": "vue-tsc --noEmit && tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.preload.json --noEmit"
