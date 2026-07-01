@@ -30,7 +30,7 @@ jobs:
             os: windows-latest
             script: build:win
           - platform: macos
-            os: macos-latest
+            os: macos-15
             script: build:mac
           - platform: linux
             os: ubuntu-latest
